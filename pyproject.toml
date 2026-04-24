@@ -15,7 +15,7 @@ dependencies = [
     # frozen). Per the mcp-server-dev plugin guidance, migrated to the
     # standalone `fastmcp` (3.x) package for its first-class streamable-HTTP
     # transport and active development. See README → Deviations from spec.
-    "fastmcp>=2.0,<4.0",
+    "fastmcp>=3.0,<4.0",
     "pydantic>=2.9",
     "pydantic-settings>=2.5",
     "httpx>=0.27",
