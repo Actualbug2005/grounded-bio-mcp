@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""End-to-end smoke test — phases 1 + 2 (11 tools).
+"""End-to-end smoke test — phases 1 + 2 + 3 (15 tools).
 
 Calls every registered tool (``bio_fetch_sequence``, ``bio_fetch_uniprot``,
 ``bio_fetch_pdb``, ``bio_fetch_alphafold``, ``bio_align_sequences``,
 ``bio_scan_domains``, ``bio_fetch_compound``, ``bio_fetch_bioactivity``,
-``bio_fetch_variant``, ``bio_predict_variant_effect``, ``bio_fetch_gene``)
-through the in-process FastMCP client — i.e. the same handshake path
-Claude would use — against real upstream APIs, with the spec §10.2
-test accessions. Prints a pass/fail summary and exits non-zero on any
-failure.
+``bio_fetch_variant``, ``bio_predict_variant_effect``, ``bio_fetch_gene``,
+``bio_search_literature``, ``bio_fetch_paper_fulltext``,
+``bio_fetch_pathway``, ``bio_fetch_interactions``) through the in-process
+FastMCP client — i.e. the same handshake path Claude would use — against
+real upstream APIs, with the spec §10.2 test accessions. Prints a
+pass/fail summary and exits non-zero on any failure.
 
 The two EBI async tools are gated on EBI_EMAIL: without it, they
 exercise the graceful "EBI_EMAIL required" error path rather than
@@ -86,9 +87,15 @@ async def _check(
 
 
 def _build_cases() -> list[tuple[str, dict[str, Any], Any]]:
-    import os as _os
+    # Mirror the server wrapper's view of EBI_EMAIL rather than reading
+    # os.environ directly — the server loads .env via pydantic-settings,
+    # so an EBI_EMAIL set in .env but not exported to the shell would
+    # make the tool dispatch live while the smoke-test lambda still
+    # expected the graceful-error branch. Asking get_settings() keeps
+    # both sides in sync.
+    from bioinformatics_mcp.config import get_settings as _get_settings
 
-    has_email = bool(_os.environ.get("EBI_EMAIL"))
+    has_email = bool(_get_settings().ebi_email)
 
     # Shared input for the async EBI tools.
     insulin_orthologues = [
@@ -307,6 +314,132 @@ def _build_cases() -> list[tuple[str, dict[str, Any], Any]]:
                 f"below_excluded={p['below_threshold_excluded']}",
             )[-1],
         ),
+        (
+            "bio_search_literature",
+            {
+                "query": "Sugisawa 2016 AIM feline",
+                "max_results": 3,
+            },
+            lambda p: (
+                _assert(
+                    p.get("error") is not True,
+                    f"literature errored: {p.get('message')}",
+                ),
+                _assert(p["status"] == "found", f"status={p['status']}"),
+                _assert(p["hit_count"] >= 1, f"hits={p['hit_count']}"),
+                _assert(
+                    p["papers"][0]["pmcid"] == "PMC5059666",
+                    f"first pmcid={p['papers'][0].get('pmcid')}",
+                ),
+                _assert(
+                    p["papers"][0]["fulltext_available"] is True,
+                    "Sugisawa 2016 fulltext should be available",
+                ),
+                f"Sugisawa 2016 PMC5059666 hits={p['hit_count']}",
+            )[-1],
+        ),
+        (
+            "bio_fetch_paper_fulltext",
+            {"identifier": "PMC5059666", "identifier_type": "pmc"},
+            lambda p: (
+                _assert(
+                    p.get("error") is not True,
+                    f"fulltext errored: {p.get('message')}",
+                ),
+                _assert(p["status"] == "found", f"status={p['status']}"),
+                _assert(
+                    p["availability"] == "full_xml",
+                    f"availability={p['availability']}",
+                ),
+                _assert(
+                    p["pmcid"] == "PMC5059666",
+                    f"pmcid={p['pmcid']}",
+                ),
+                _assert(
+                    any(s["title"] == "Methods" for s in p["sections"]),
+                    "Methods section missing from Sugisawa 2016 parse",
+                ),
+                _assert(
+                    len(p["figures"]) >= 1,
+                    f"figures={len(p['figures'])}",
+                ),
+                f"PMC5059666 availability={p['availability']} "
+                f"sections={len(p['sections'])} figures={len(p['figures'])}",
+            )[-1],
+        ),
+        (
+            "bio_fetch_pathway",
+            {"identifier": "R-HSA-109581", "identifier_type": "pathway_id"},
+            lambda p: (
+                _assert(
+                    p.get("error") is not True,
+                    f"pathway errored: {p.get('message')}",
+                ),
+                _assert(p["status"] == "found", f"status={p['status']}"),
+                _assert(
+                    p["pathway"]["name"] == "Apoptosis",
+                    f"name={p['pathway']['name']}",
+                ),
+                _assert(
+                    p["pathway"]["species"] == "Homo sapiens",
+                    f"species={p['pathway']['species']}",
+                ),
+                _assert(
+                    len(p["pathway"]["literature_references"]) >= 1,
+                    "no literature refs",
+                ),
+                f"R-HSA-109581 {p['pathway']['name']} "
+                f"lit_refs={len(p['pathway']['literature_references'])}",
+            )[-1],
+        ),
+        (
+            "bio_fetch_interactions",
+            {
+                "identifier": "TP53",
+                "species_taxon": 9606,
+                "min_score": 700,
+                "max_partners": 10,
+            },
+            # Scale reminder for anyone reading this smoke test as a
+            # usage example: min_score=700 is 0-1000 input scale (0.7
+            # threshold); output score and sub-scores are 0-1.
+            lambda p: (
+                _assert(
+                    p.get("error") is not True,
+                    f"interactions errored: {p.get('message')}",
+                ),
+                _assert(p["status"] == "found", f"status={p['status']}"),
+                _assert(
+                    p["score_scale"] == {
+                        "input_min_score": "0-1000",
+                        "output_scores": "0-1",
+                    },
+                    "score_scale contract not surfaced in response",
+                ),
+                _assert(
+                    all(e["combined_score"] >= 0.7 for e in p["partners"]),
+                    "found partners below 0.7 despite min_score=700 filter",
+                ),
+                _assert(
+                    all(
+                        set(e["evidence"].keys())
+                        == {
+                            "neighbourhood",
+                            "fusion",
+                            "co_occurrence",
+                            "coexpression",
+                            "experimental",
+                            "database",
+                            "textmining",
+                        }
+                        for e in p["partners"]
+                    ),
+                    "evidence channel names drifted from 7-channel contract",
+                ),
+                f"TP53/9606 partners={len(p['partners'])} "
+                f"min_score={p['query']['min_score']}",
+            )[-1],
+        ),
     ]
 
 
@@ -387,6 +520,10 @@ async def run() -> int:
             "bio_fetch_variant",
             "bio_predict_variant_effect",
             "bio_fetch_gene",
+            "bio_search_literature",
+            "bio_fetch_paper_fulltext",
+            "bio_fetch_pathway",
+            "bio_fetch_interactions",
         }
         missing = expected - names
         if missing:
@@ -399,7 +536,7 @@ async def run() -> int:
 
     passed = sum(1 for _, ok, _ in results if ok)
     total = len(results)
-    print(f"\nPhase 1+2 smoke test  —  {passed}/{total} passed\n")
+    print(f"\nPhase 1+2+3 smoke test  —  {passed}/{total} passed\n")
     for name, ok, detail in results:
         marker = "✓" if ok else "✗"
         print(f"  {marker} {name:24}  {detail}")
