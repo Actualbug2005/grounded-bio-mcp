@@ -157,7 +157,7 @@ def _parse_matches(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 async def bio_scan_domains(
     sequence: str,
-    applications: list[str] | None = None,
+    applications: Sequence[str] | None = None,
     max_wait_seconds: int | None = None,
     *,
     runner: EBIJobRunner,
