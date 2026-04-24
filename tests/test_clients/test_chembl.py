@@ -229,14 +229,19 @@ async def test_list_assays_by_ids_returns_confidence_scores(
         return_value=httpx.Response(200, text=_load("chembl_assays_batch.json"))
     )
 
+    # Fixture contains the three assays joined to the activities fixture
+    # — two with cs=0 (target unknown), one with cs=8 (COX-2 homologous).
     assays = await chembl_client.list_assays_by_ids(
-        ["CHEMBL702885", "CHEMBL1613776"]
+        ["CHEMBL762032", "CHEMBL762033", "CHEMBL760085"]
     )
 
     by_id = {a["assay_chembl_id"]: a for a in assays}
-    assert by_id["CHEMBL702885"]["confidence_score"] == 8
-    assert by_id["CHEMBL1613776"]["confidence_score"] == 9
-    assert "Homologous" in by_id["CHEMBL702885"]["confidence_description"]
+    assert by_id["CHEMBL760085"]["confidence_score"] == 8
+    assert "Homologous" in by_id["CHEMBL760085"]["confidence_description"]
+    # ChEMBL can return cs=0 "Default value - Target unknown" even when
+    # the activity query was filtered with confidence_score__gte=7 — the
+    # server-side filter is leaky, verified 2026-04-24.
+    assert by_id["CHEMBL762032"]["confidence_score"] == 0
 
 
 @respx.mock
@@ -259,11 +264,13 @@ async def test_list_targets_by_ids_returns_uniprot_components(
         return_value=httpx.Response(200, text=_load("chembl_targets_batch.json"))
     )
 
-    targets = await chembl_client.list_targets_by_ids(["CHEMBL3253", "CHEMBL204"])
+    targets = await chembl_client.list_targets_by_ids(
+        ["CHEMBL230", "CHEMBL612545"]
+    )
 
     by_id = {t["target_chembl_id"]: t for t in targets}
-    # CHEMBL204 is prothrombin — its target_components list contains at
-    # least one UniProt accession (P00734).
-    comps = by_id["CHEMBL204"]["target_components"]
+    # CHEMBL230 is COX-2 (Prostaglandin G/H synthase 2) — its
+    # target_components list contains UniProt P35354.
+    comps = by_id["CHEMBL230"]["target_components"]
     accessions = {c.get("accession") for c in comps}
-    assert "P00734" in accessions
+    assert "P35354" in accessions

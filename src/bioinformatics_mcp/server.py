@@ -34,6 +34,9 @@ from bioinformatics_mcp.clients.uniprot import UniProtClient
 from bioinformatics_mcp.config import get_settings
 from bioinformatics_mcp.tools.align_sequences import bio_align_sequences as _align_impl
 from bioinformatics_mcp.tools.fetch_alphafold import fetch_alphafold
+from bioinformatics_mcp.tools.fetch_bioactivity import (
+    bio_fetch_bioactivity as _bioactivity_impl,
+)
 from bioinformatics_mcp.tools.fetch_compound import (
     bio_fetch_compound as _compound_impl,
 )
@@ -402,6 +405,61 @@ async def bio_fetch_compound(
         source=source,
         chembl=_chembl_client(),
         pubchem=_pubchem_client(),
+    )
+
+
+@mcp.tool(
+    title="Fetch ChEMBL Bioactivity",
+    annotations={
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "openWorldHint": True,
+        # ChEMBL accepts new assay submissions — the same query may gain
+        # rows over time.
+        "idempotentHint": False,
+    },
+)
+async def bio_fetch_bioactivity(
+    query_type: Literal["compound", "target"],
+    identifier: str,
+    activity_types: list[
+        Literal["IC50", "Ki", "Kd", "EC50", "AC50", "Potency"]
+    ]
+    | None = None,
+    max_results: int = 50,
+    min_confidence: int = 7,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Fetch measured bioactivity (IC50/Ki/Kd/...) from ChEMBL.
+
+    Two query directions:
+      - ``query_type='compound'``: give a compound ChEMBL ID
+        (e.g. ``CHEMBL25`` for aspirin); returns what it binds to.
+      - ``query_type='target'``: give a target ChEMBL ID
+        (e.g. ``CHEMBL204`` for thrombin) or a UniProt accession
+        (e.g. ``P00734``); the tool resolves UniProt → target and
+        returns what hits it.
+
+    ``min_confidence`` defaults to 7 — ChEMBL's "direct single-protein
+    target assigned" threshold. Lowering this admits assays with weak
+    target mapping; DO NOT lower without a specific reason. Records
+    whose joined assay has null confidence are always excluded; records
+    below threshold are also excluded (ChEMBL's server-side filter is
+    leaky, so the tool re-enforces client-side). Both exclusion counts
+    appear in the output.
+
+    Pagination via ``max_results`` (1-500, default 50) and ``offset``.
+    ``page_meta.truncated`` + ``page_meta.next_offset`` indicate when
+    additional pages are available.
+    """
+    return await _bioactivity_impl(
+        query_type=query_type,
+        identifier=identifier,
+        activity_types=list(activity_types) if activity_types else None,
+        max_results=max_results,
+        min_confidence=min_confidence,
+        offset=offset,
+        chembl=_chembl_client(),
     )
 
 
