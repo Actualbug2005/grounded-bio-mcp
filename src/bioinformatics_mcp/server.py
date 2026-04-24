@@ -27,6 +27,7 @@ from bioinformatics_mcp.clients.alphafold import AlphaFoldClient
 from bioinformatics_mcp.clients.base import RATE_LIMITS
 from bioinformatics_mcp.clients.chembl import ChEMBLClient
 from bioinformatics_mcp.clients.ebi import EBIJobRunner
+from bioinformatics_mcp.clients.ensembl import EnsemblClient
 from bioinformatics_mcp.clients.ncbi import NCBIClient
 from bioinformatics_mcp.clients.pubchem import PubChemClient
 from bioinformatics_mcp.clients.rcsb import RCSBClient
@@ -40,9 +41,14 @@ from bioinformatics_mcp.tools.fetch_bioactivity import (
 from bioinformatics_mcp.tools.fetch_compound import (
     bio_fetch_compound as _compound_impl,
 )
+from bioinformatics_mcp.tools.fetch_gene import bio_fetch_gene as _gene_impl
 from bioinformatics_mcp.tools.fetch_pdb import fetch_pdb
 from bioinformatics_mcp.tools.fetch_sequence import fetch_sequence
 from bioinformatics_mcp.tools.fetch_uniprot import fetch_uniprot
+from bioinformatics_mcp.tools.fetch_variant import bio_fetch_variant as _variant_impl
+from bioinformatics_mcp.tools.predict_variant_effect import (
+    bio_predict_variant_effect as _vep_impl,
+)
 from bioinformatics_mcp.tools.scan_domains import bio_scan_domains as _scan_impl
 from bioinformatics_mcp.utils.errors import error_response
 from bioinformatics_mcp.utils.rate_limit import RateLimitedClient
@@ -76,6 +82,9 @@ Tool selection guide (spec §3):
 | "Does this uncharacterised protein have Pfam hits?"  | bio_scan_domains           | bio_fetch_uniprot (if curated)           |
 | "What are the properties / structure of compound X?" | bio_fetch_compound         | bio_fetch_bioactivity (for binding data) |
 | "What does compound X bind to, and how tightly?"     | bio_fetch_bioactivity      | bio_fetch_compound (for structure first) |
+| "Where is gene X on the genome? What are its exons?" | bio_fetch_gene (NCBI)      | —                                        |
+| "Does variant rsXXX exist? What are its alleles/MAF?"| bio_fetch_variant (Ensembl)| bio_predict_variant_effect (for function)|
+| "What's the functional consequence of this variant?" | bio_predict_variant_effect | bio_fetch_variant (for population context)|
 
 bio_fetch_compound answers "what IS this compound" — SMILES, InChI, MW,
 LogP, clinical phase, synonyms — from ChEMBL (drug-curated) and PubChem
@@ -87,9 +96,34 @@ IC50/Ki/Kd values against named targets, filtered to ChEMBL confidence
 Do NOT pattern-match drug target or affinity values from training data
 — use this tool.
 
-Phase 1 exposes eight tools: the six above plus bio_fetch_compound and
-bio_fetch_bioactivity. Later phases add BLAST, CRISPR guide design,
-variants, literature, pathways, and interactions.
+bio_fetch_gene answers "what gene is this and where is it" — NCBI Gene
+ID, official symbol, chromosome + coordinates, exon count, RefSeq
+transcripts (NM_/NP_), GO annotations, and cross-refs to UniProt and
+Ensembl. When a symbol resolves to multiple Gene IDs (cross-species or
+alias ambiguity), the tool surfaces candidate_gene_ids with
+disambiguation context instead of picking arbitrarily.
+
+bio_fetch_variant answers "does this variant exist, and what are its
+alleles / population frequencies / clinical significance" — Ensembl
+/variation lookup by rsID or chr:pos:ref:alt. Ensembl cannot
+distinguish a real-but-unannotated rsID from a fabricated one (both
+return the same 400 error); the tool exposes two honest outcomes
+(found / not_found) plus an annotation_richness object with presence
+flags for clinical_significance, population_frequencies, and
+consequences. DO NOT invent rsIDs or allele frequencies from training
+data — this tool is the anti-hallucination surface for variants.
+
+bio_predict_variant_effect answers "what's the functional consequence
+of this variant" — Ensembl VEP with HGVS.c/p/g or chr:pos:ref:alt
+input. Returns three parallel consequence lists (transcript,
+regulatory_feature, intergenic) so callers don't special-case based
+on where the variant falls; SIFT and PolyPhen scores come through when
+Ensembl provides them.
+
+Phase 1 exposed eight tools. Phase 2 adds bio_fetch_gene,
+bio_fetch_variant, and bio_predict_variant_effect (spec §4.11, §4.12,
+§4.16) — 11 tools total. Later phases add BLAST, CRISPR guide design,
+literature, pathways, and interactions.
 
 Confidence caveats (anti-hallucination):
   - AlphaFold predictions include per-residue pLDDT; regions with pLDDT < 70
@@ -163,6 +197,11 @@ def _chembl_client() -> ChEMBLClient:
 @lru_cache(maxsize=1)
 def _pubchem_client() -> PubChemClient:
     return PubChemClient()
+
+
+@lru_cache(maxsize=1)
+def _ensembl_client() -> EnsemblClient:
+    return EnsemblClient()
 
 
 @lru_cache(maxsize=1)
@@ -460,6 +499,102 @@ async def bio_fetch_bioactivity(
         min_confidence=min_confidence,
         offset=offset,
         chembl=_chembl_client(),
+    )
+
+
+@mcp.tool(
+    title="Fetch Variant (Ensembl)",
+    annotations={
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "openWorldHint": True,
+        # Ensembl releases update allele frequencies, ClinVar
+        # cross-references, and consequence predictions over time.
+        "idempotentHint": False,
+    },
+)
+async def bio_fetch_variant(
+    identifier: str,
+    species: str = "human",
+    assembly: str | None = None,
+) -> dict[str, Any]:
+    """Look up a variant by rsID or ``chr:pos:ref:alt`` coordinates via Ensembl.
+
+    Returns alleles, genomic mapping, clinical significance, and
+    population frequencies (gnomADe preferred for MAF, falling back
+    to 1000G). Ensembl cannot distinguish an unannotated real rsID
+    from a fabricated one — the tool reports ``found`` with an
+    ``annotation_richness`` object (presence flags for
+    clinical_significance / population_frequencies / consequences) or
+    ``not_found`` honestly. ``assembly="GRCh37"`` routes to the legacy
+    server; ``assembly_used`` is echoed in every response.
+    """
+    return await _variant_impl(
+        identifier=identifier,
+        species=species,
+        assembly=assembly,
+        client=_ensembl_client(),
+    )
+
+
+@mcp.tool(
+    title="Predict Variant Effect (VEP)",
+    annotations={
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "openWorldHint": True,
+        # Ensembl releases retune transcript models and scoring
+        # matrices, so VEP output for the same input can shift.
+        "idempotentHint": False,
+    },
+)
+async def bio_predict_variant_effect(
+    variant: str,
+    species: str = "human",
+    input_format: Literal["hgvs", "region", "auto"] = "auto",
+    assembly: str | None = None,
+) -> dict[str, Any]:
+    """Predict functional consequences for a variant via Ensembl VEP.
+
+    Accepts HGVS.c / HGVS.p / HGVS.g (e.g. ``ENSP00000252486.4:p.Cys130Arg``)
+    or ``chr:pos:ref:alt`` (e.g. ``19:44908684:T:C``). Returns three
+    parallel consequence lists (transcript, regulatory_feature,
+    intergenic) plus SIFT/PolyPhen scores when available. For empty
+    region-format results the tool surfaces a REF-mismatch hint — VEP
+    silently returns no consequences when REF disagrees with the
+    assembly rather than producing an explicit error.
+    """
+    return await _vep_impl(
+        variant=variant,
+        species=species,
+        input_format=input_format,
+        assembly=assembly,
+        client=_ensembl_client(),
+    )
+
+
+@mcp.tool(
+    title="Fetch NCBI Gene",
+    annotations=_READ_ONLY_ANNOTATIONS,
+)
+async def bio_fetch_gene(
+    identifier: str,
+    organism: str = "Homo sapiens",
+) -> dict[str, Any]:
+    """Fetch an NCBI Gene record by symbol or Gene ID.
+
+    Accepts a gene symbol (``BRCA1``) or numeric NCBI Gene ID (``672``).
+    Returns genomic location (chromosome, assembly accession, exon
+    count), RefSeq transcripts (NM_/NP_/XM_/XR_/XP_), GO annotations,
+    and cross-references to UniProt, Ensembl, HGNC, MGI, and MIM.
+    Ambiguous symbols return ``candidate_gene_ids`` with
+    disambiguation context rather than picking arbitrarily — re-query
+    with a specific Gene ID or organism to resolve.
+    """
+    return await _gene_impl(
+        identifier=identifier,
+        organism=organism,
+        client=_ncbi_client(),
     )
 
 
