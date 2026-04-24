@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Phase-1a end-to-end smoke test.
+"""Phase-1a/1b end-to-end smoke test.
 
-Calls every phase-1a tool (``bio_fetch_sequence``, ``bio_fetch_uniprot``,
-``bio_fetch_pdb``, ``bio_fetch_alphafold``) through the in-process FastMCP
-client — i.e. the same handshake path Claude would use — against real
-upstream APIs, with the spec §10.2 test accessions. Prints a pass/fail
-summary and exits non-zero on any failure.
+Calls every phase-1a/1b tool (``bio_fetch_sequence``, ``bio_fetch_uniprot``,
+``bio_fetch_pdb``, ``bio_fetch_alphafold``, ``bio_align_sequences``,
+``bio_scan_domains``) through the in-process FastMCP client — i.e. the
+same handshake path Claude would use — against real upstream APIs, with
+the spec §10.2 test accessions. Prints a pass/fail summary and exits
+non-zero on any failure.
+
+The two EBI async tools are gated on EBI_EMAIL: without it, they
+exercise the graceful "EBI_EMAIL required" error path rather than
+skipping entirely, so the smoke test still validates wiring.
 
 Run locally::
 
@@ -78,6 +83,84 @@ async def _check(
     return True, detail
 
 
+def _build_cases() -> list[tuple[str, dict[str, Any], Any]]:
+    import os as _os
+
+    has_email = bool(_os.environ.get("EBI_EMAIL"))
+
+    # Shared input for the async EBI tools.
+    insulin_orthologues = [
+        {"id": "human", "sequence": "MALWMRLLPLLALLALWGPDPAAA"},
+        {"id": "mouse", "sequence": "MALWMRFLPLLALLVLWEPKPAQA"},
+        {"id": "bovine", "sequence": "MALWTRLRPLLALLALWPPPPARA"},
+    ]
+    insulin_protein = (
+        "MALWMRLLPLLALLALWGPDPAAAFVNQHLCGSHLVEALYLVCGERGFFYTPKTRREAEDLQ"
+        "VGQVELGGGPGAGSLQPLALEGSLQKRGIVEQCCTSICSLYQLENYCN"
+    )
+
+    if has_email:
+        async_align_assertion = lambda p: (  # noqa: E731
+            _assert(
+                p.get("error") is not True,
+                f"align errored: {p.get('message')}",
+            ),
+            _assert(p["sequence_count"] == 3, f"count={p.get('sequence_count')}"),
+            _assert(
+                p["alignment_statistics"]["conserved_columns_count"] > 0,
+                "no conserved columns",
+            ),
+            f"conserved={p['alignment_statistics']['conserved_columns_count']} "
+            f"strict={p['alignment_statistics']['strict_identity_pct']}%",
+        )[-1]
+        async_scan_assertion = lambda p: (  # noqa: E731
+            _assert(
+                p.get("error") is not True,
+                f"scan errored: {p.get('message')}",
+            ),
+            _assert(p["match_count"] > 0, "no Pfam/SMART hits on insulin"),
+            f"matches={p['match_count']} dbs={p['databases_scanned']}",
+        )[-1]
+    else:
+        # Without EBI_EMAIL, assert the graceful error rather than a pass.
+        async_align_assertion = lambda p: (  # noqa: E731
+            _assert(p.get("error") is True, "expected error for missing EBI_EMAIL"),
+            _assert(
+                "EBI_EMAIL" in p["message"],
+                f"expected EBI_EMAIL message, got: {p.get('message')}",
+            ),
+            "graceful EBI_EMAIL-missing error (set EBI_EMAIL for live align)",
+        )[-1]
+        async_scan_assertion = lambda p: (  # noqa: E731
+            _assert(p.get("error") is True, "expected error for missing EBI_EMAIL"),
+            _assert(
+                "EBI_EMAIL" in p["message"],
+                f"expected EBI_EMAIL message, got: {p.get('message')}",
+            ),
+            "graceful EBI_EMAIL-missing error (set EBI_EMAIL for live scan)",
+        )[-1]
+
+    return [
+        (
+            "bio_align_sequences",
+            {
+                "sequences": insulin_orthologues,
+                "sequence_type": "protein",
+                "output_format": "clustal",
+            },
+            async_align_assertion,
+        ),
+        (
+            "bio_scan_domains",
+            {
+                "sequence": insulin_protein,
+                "applications": ["Pfam", "SMART", "CDD"],
+            },
+            async_scan_assertion,
+        ),
+    ]
+
+
 async def run() -> int:
     # Tool-name → (args, assertion) maps. Each assertion returns a short
     # human-readable summary on success, raises AssertionError on failure.
@@ -137,11 +220,20 @@ async def run() -> int:
         ),
     ]
 
+    cases.extend(_build_cases())
+
     async with Client(mcp) as client:
         results: list[tuple[str, bool, str]] = []
         tools = await client.list_tools()
         names = {t.name for t in tools}
-        expected = {"bio_fetch_sequence", "bio_fetch_uniprot", "bio_fetch_pdb", "bio_fetch_alphafold"}
+        expected = {
+            "bio_fetch_sequence",
+            "bio_fetch_uniprot",
+            "bio_fetch_pdb",
+            "bio_fetch_alphafold",
+            "bio_align_sequences",
+            "bio_scan_domains",
+        }
         missing = expected - names
         if missing:
             print(f"✗ server is missing tools: {missing}")
@@ -153,7 +245,7 @@ async def run() -> int:
 
     passed = sum(1 for _, ok, _ in results if ok)
     total = len(results)
-    print(f"\nPhase-1a smoke test  —  {passed}/{total} passed\n")
+    print(f"\nPhase-1a/1b smoke test  —  {passed}/{total} passed\n")
     for name, ok, detail in results:
         marker = "✓" if ok else "✗"
         print(f"  {marker} {name:24}  {detail}")

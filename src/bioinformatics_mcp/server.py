@@ -24,14 +24,20 @@ from fastmcp import FastMCP
 
 from bioinformatics_mcp import __version__
 from bioinformatics_mcp.clients.alphafold import AlphaFoldClient
+from bioinformatics_mcp.clients.base import RATE_LIMITS
+from bioinformatics_mcp.clients.ebi import EBIJobRunner
 from bioinformatics_mcp.clients.ncbi import NCBIClient
 from bioinformatics_mcp.clients.rcsb import RCSBClient
 from bioinformatics_mcp.clients.uniprot import UniProtClient
 from bioinformatics_mcp.config import get_settings
+from bioinformatics_mcp.tools.align_sequences import bio_align_sequences as _align_impl
 from bioinformatics_mcp.tools.fetch_alphafold import fetch_alphafold
 from bioinformatics_mcp.tools.fetch_pdb import fetch_pdb
 from bioinformatics_mcp.tools.fetch_sequence import fetch_sequence
 from bioinformatics_mcp.tools.fetch_uniprot import fetch_uniprot
+from bioinformatics_mcp.tools.scan_domains import bio_scan_domains as _scan_impl
+from bioinformatics_mcp.utils.errors import error_response
+from bioinformatics_mcp.utils.rate_limit import RateLimitedClient
 
 # ---------------------------------------------------------------------------
 # Server-level instructions — spec §3 tool selection guide.
@@ -55,14 +61,16 @@ Tool selection guide (spec §3):
 | Question type                                        | First tool                 | Fallback                                 |
 |------------------------------------------------------|----------------------------|------------------------------------------|
 | "What is the sequence of gene/protein X?"            | bio_fetch_sequence (NCBI) or bio_fetch_uniprot | BLAST search by name (later phase)    |
-| "What domains are in protein X?"                     | bio_fetch_uniprot          | bio_scan_domains (InterProScan, later)   |
+| "What domains are in protein X?"                     | bio_fetch_uniprot          | bio_scan_domains (InterProScan)          |
 | "What's the structure of protein X?"                 | bio_fetch_pdb (if known)   | bio_fetch_alphafold (predicted)          |
 | "What's the AlphaFold prediction for X?"             | bio_fetch_alphafold        | —                                        |
+| "How similar are these N sequences?"                 | bio_align_sequences        | —                                        |
+| "Does this uncharacterised protein have Pfam hits?"  | bio_scan_domains           | bio_fetch_uniprot (if curated)           |
 
-Phase 1a exposes exactly four tools: bio_fetch_sequence, bio_fetch_uniprot,
-bio_fetch_pdb, bio_fetch_alphafold. Later phases add alignment, BLAST,
-CRISPR guide design, compound/bioactivity, variants, literature, pathways,
-and interactions.
+Phase 1a + 1b exposes six tools: bio_fetch_sequence, bio_fetch_uniprot,
+bio_fetch_pdb, bio_fetch_alphafold, bio_align_sequences, bio_scan_domains.
+Later phases add BLAST, CRISPR guide design, compound/bioactivity, variants,
+literature, pathways, and interactions.
 
 Confidence caveats (anti-hallucination):
   - AlphaFold predictions include per-residue pLDDT; regions with pLDDT < 70
@@ -108,6 +116,39 @@ def _rcsb_client() -> RCSBClient:
 @lru_cache(maxsize=1)
 def _alphafold_client() -> AlphaFoldClient:
     return AlphaFoldClient()
+
+
+@lru_cache(maxsize=1)
+def _ebi_client() -> RateLimitedClient:
+    """One shared EBI rate-limited client, reused by all Job Dispatcher tools.
+
+    Must be shared across `_clustalo_runner()` and `_iprscan5_runner()` so
+    the EBI per-IP cap (3 concurrent / 500 ms, spec §7.1) applies across
+    both services. Two separate instances would give 6 concurrent and
+    violate EBI's terms.
+    """
+    params = RATE_LIMITS["ebi"]
+    return RateLimitedClient(
+        max_concurrent=params.max_concurrent,
+        min_interval_s=params.min_interval_s,
+        timeout=60.0,
+        headers={"User-Agent": "bioinformatics-mcp/0.2 (+ebi-jobdispatcher)"},
+    )
+
+
+@lru_cache(maxsize=1)
+def _clustalo_runner() -> EBIJobRunner:
+    return EBIJobRunner("clustalo", _ebi_client())
+
+
+@lru_cache(maxsize=1)
+def _iprscan5_runner() -> EBIJobRunner:
+    return EBIJobRunner("iprscan5", _ebi_client())
+
+
+def _require_ebi_email() -> str | None:
+    """Return the server's EBI_EMAIL, or None if not configured."""
+    return get_settings().ebi_email
 
 
 mcp: FastMCP = FastMCP(
@@ -220,6 +261,85 @@ async def bio_fetch_alphafold(
         uniprot_accession=uniprot_accession,
         format=format,
         client=_alphafold_client(),
+    )
+
+
+@mcp.tool(
+    title="Align Sequences (Clustal Omega)",
+    annotations=_READ_ONLY_ANNOTATIONS,
+)
+async def bio_align_sequences(
+    sequences: list[dict[str, Any]],
+    sequence_type: Literal["protein", "dna", "rna"],
+    output_format: Literal["clustal", "fasta", "msf"] = "clustal",
+) -> dict[str, Any]:
+    """Multiple sequence alignment via EBI Clustal Omega (async EBI Job Dispatcher).
+
+    Accepts 2-500 sequences as ``{id, sequence}`` dicts. Returns the raw
+    alignment plus four statistics (alignment_length,
+    conserved_columns_count, strict_identity_pct,
+    mean_pairwise_identity_pct, gap_pct) — see ``tools/align_sequences.py``
+    for exact definitions. Long gap stretches in divergent sequences are
+    valid output, not tool errors.
+    """
+    email = _require_ebi_email()
+    if not email:
+        return error_response(
+            "bio_align_sequences requires EBI_EMAIL to be set at the server — "
+            "EBI mandates an email on every Job Dispatcher submission.",
+            suggestions=[
+                "Set EBI_EMAIL in the server's environment (.env on dev, "
+                "systemd EnvironmentFile on the LXC).",
+            ],
+        )
+    return await _align_impl(
+        sequences=sequences,
+        sequence_type=sequence_type,
+        output_format=output_format,
+        runner=_clustalo_runner(),
+        email=email,
+    )
+
+
+@mcp.tool(
+    title="Scan Protein Domains (InterProScan)",
+    annotations=_READ_ONLY_ANNOTATIONS,
+)
+async def bio_scan_domains(
+    sequence: str,
+    applications: list[
+        Literal["Pfam", "SMART", "PROSITE", "CDD", "SUPERFAMILY", "Gene3D"]
+    ]
+    | None = None,
+    max_wait_seconds: int | None = None,
+) -> dict[str, Any]:
+    """Protein domain architecture prediction via EBI InterProScan.
+
+    Returns a flattened per-match list with signature + InterPro
+    cross-reference + location + e-value/score. Empty ``matches`` is a
+    valid result, not an error. Spec-facing database names ("Pfam",
+    "PROSITE", etc.) are mapped to EBI-canonical names at submission
+    time — "Pfam" becomes "PfamA", "PROSITE" expands to two databases.
+
+    ``max_wait_seconds`` overrides the 600 s default and caps at 1800 s.
+    On timeout this tool returns a hard error with the job ID — partial
+    results during a RUNNING job are not implemented in this build.
+    """
+    email = _require_ebi_email()
+    if not email:
+        return error_response(
+            "bio_scan_domains requires EBI_EMAIL to be set at the server.",
+            suggestions=[
+                "Set EBI_EMAIL in the server's environment (.env on dev, "
+                "systemd EnvironmentFile on the LXC).",
+            ],
+        )
+    return await _scan_impl(
+        sequence=sequence,
+        applications=applications,
+        max_wait_seconds=max_wait_seconds,
+        runner=_iprscan5_runner(),
+        email=email,
     )
 
 
