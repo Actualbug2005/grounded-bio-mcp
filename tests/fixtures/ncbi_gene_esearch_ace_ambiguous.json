@@ -1,0 +1,1 @@
+{"header":{"type":"esearch","version":"0.3"},"esearchresult":{"count":"794","retmax":"5","retstart":"0","idlist":["1636","24310","41625","30538","11421"],"translationset":[],"translationstack":[{"term":"ACE[Gene]","field":"Gene","count":"794","explode":"N"},"GROUP"],"querytranslation":"ACE[Gene]"}}

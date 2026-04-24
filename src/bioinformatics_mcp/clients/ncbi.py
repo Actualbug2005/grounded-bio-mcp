@@ -108,6 +108,109 @@ class NCBIClient:
         self._raise_for_status(response, db=db, accession=accession)
         return response.text
 
+    @retry(
+        retry=retry_if_exception_type((RateLimitExceeded, ExternalServiceDown)),
+        wait=wait_exponential(multiplier=0.5, min=0.5, max=8.0),
+        stop=stop_after_attempt(4),
+        reraise=True,
+    )
+    async def esearch(
+        self,
+        *,
+        db: str,
+        term: str,
+        retmax: int = 20,
+    ) -> list[str]:
+        """Resolve a query term to a list of NCBI IDs via ``esearch.fcgi``.
+
+        Used by :mod:`bio_fetch_gene` to translate a gene symbol +
+        organism into a Gene ID list. The JSON ``esearchresult.idlist``
+        is returned directly; callers decide whether a single hit is a
+        unique resolution or multiple hits require disambiguation.
+        """
+        query: dict[str, Any] = {
+            "db": db,
+            "term": term,
+            "retmax": int(retmax),
+            "retmode": "json",
+        }
+        if self._api_key:
+            query["api_key"] = self._api_key
+        if self._email:
+            query["email"] = self._email
+
+        response = await self._client.request("GET", "/esearch.fcgi", params=query)
+        self._raise_for_status(response, db=db, accession=term)
+        payload = response.json()
+        return list(payload.get("esearchresult", {}).get("idlist", []))
+
+    @retry(
+        retry=retry_if_exception_type((RateLimitExceeded, ExternalServiceDown)),
+        wait=wait_exponential(multiplier=0.5, min=0.5, max=8.0),
+        stop=stop_after_attempt(4),
+        reraise=True,
+    )
+    async def esummary(
+        self,
+        *,
+        db: str,
+        ids: list[str],
+    ) -> dict[str, Any]:
+        """Fetch structured summary records for a batch of IDs.
+
+        Returns the raw ``result`` dict from the JSON esummary response:
+        keyed by UID with a ``uids`` list. Callers iterate the UIDs to
+        build disambiguation candidates or drill into a unique record.
+        """
+        if not ids:
+            return {"uids": []}
+        query: dict[str, Any] = {
+            "db": db,
+            "id": ",".join(ids),
+            "retmode": "json",
+        }
+        if self._api_key:
+            query["api_key"] = self._api_key
+        if self._email:
+            query["email"] = self._email
+
+        response = await self._client.request("GET", "/esummary.fcgi", params=query)
+        self._raise_for_status(response, db=db, accession=",".join(ids))
+        payload = response.json()
+        return dict(payload.get("result", {}))
+
+    @retry(
+        retry=retry_if_exception_type((RateLimitExceeded, ExternalServiceDown)),
+        wait=wait_exponential(multiplier=0.5, min=0.5, max=8.0),
+        stop=stop_after_attempt(4),
+        reraise=True,
+    )
+    async def efetch_xml(
+        self,
+        *,
+        db: str,
+        uid: str,
+    ) -> str:
+        """Fetch a record as Entrezgene XML (or db-appropriate XML).
+
+        Used by :mod:`bio_fetch_gene` to retrieve the full Entrezgene
+        record — RefSeq transcripts, GO annotations, UniProt/Ensembl
+        cross-references. Parsers live in the tool layer, not here.
+        """
+        query: dict[str, Any] = {
+            "db": db,
+            "id": uid,
+            "retmode": "xml",
+        }
+        if self._api_key:
+            query["api_key"] = self._api_key
+        if self._email:
+            query["email"] = self._email
+
+        response = await self._client.request("GET", "/efetch.fcgi", params=query)
+        self._raise_for_status(response, db=db, accession=uid)
+        return response.text
+
     @staticmethod
     def _raise_for_status(response: httpx.Response, *, db: str, accession: str) -> None:
         status = response.status_code
