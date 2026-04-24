@@ -126,9 +126,12 @@ class EuropePMCClient:
         the abstract-only path.
         """
         normalised = _normalise_pmc_id(pmc_id)
+        # Per-request Accept override — Europe PMC returns 406 when the
+        # default Accept: application/json is sent to /fullTextXML.
         response = await self._client.request(
             "GET",
             f"{EUROPEPMC_BASE_URL}/{normalised}/fullTextXML",
+            headers={"Accept": "application/xml"},
         )
         self._raise_for_status(response, identifier=normalised)
         return response.content
