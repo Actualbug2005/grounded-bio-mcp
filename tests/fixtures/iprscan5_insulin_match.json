@@ -1,0 +1,47 @@
+{
+  "interproscan-version": "5.65-97.0",
+  "results": [
+    {
+      "sequence": "MALWMRLLPLLALLALWGPDPAAAFVNQHLCGSHLVEALYLVCGERGFFYTPKTRREAEDLQVGQVELGGGPGAGSLQPLALEGSLQKRGIVEQCCTSICSLYQLENYCN",
+      "xref": [{"name": "INSULIN_HUMAN"}],
+      "matches": [
+        {
+          "signature": {
+            "accession": "PF00049",
+            "name": "Insulin",
+            "description": "Insulin/IGF/Relaxin family",
+            "signatureLibraryRelease": {"library": "PFAM", "version": "36.0"},
+            "entry": {
+              "accession": "IPR004825",
+              "name": "Insulin-like",
+              "description": "Insulin/IGF/Relaxin family"
+            }
+          },
+          "evalue": 3.2e-30,
+          "score": 110.5,
+          "locations": [
+            {"start": 25, "end": 108, "evalue": 3.2e-30, "score": 110.5}
+          ]
+        },
+        {
+          "signature": {
+            "accession": "SM00078",
+            "name": "IlGF",
+            "description": "Insulin/insulin-like growth factor/relaxin family",
+            "signatureLibraryRelease": {"library": "SMART", "version": "9.0"},
+            "entry": {
+              "accession": "IPR004825",
+              "name": "Insulin-like",
+              "description": "Insulin/IGF/Relaxin family"
+            }
+          },
+          "evalue": 1.1e-25,
+          "score": 95.3,
+          "locations": [
+            {"start": 28, "end": 106, "evalue": 1.1e-25, "score": 95.3}
+          ]
+        }
+      ]
+    }
+  ]
+}
