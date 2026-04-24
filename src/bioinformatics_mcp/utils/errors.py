@@ -62,6 +62,45 @@ class ExternalServiceDown(BioMCPError):
         self.status_url = status_url
 
 
+class JobTimeoutError(BioMCPError):
+    """Raised when an async job (EBI Clustal/InterProScan/etc.) exceeds its wall-clock budget.
+
+    Carries the job ID so callers can surface it in their error response —
+    users can poll the EBI status URL manually if they need the eventual
+    result. The runner best-effort-cancels the job before raising; whether
+    that succeeded is in `cancelled`.
+    """
+
+    def __init__(
+        self,
+        service: str,
+        job_id: str,
+        timeout_s: float,
+        status_url: str,
+        cancelled: bool,
+    ) -> None:
+        cancel_note = " Cancelled." if cancelled else ""
+        super().__init__(
+            f"{service} job {job_id} did not complete in {timeout_s:.0f}s.{cancel_note} "
+            f"Check status at {status_url}"
+        )
+        self.service = service
+        self.job_id = job_id
+        self.timeout_s = timeout_s
+        self.status_url = status_url
+        self.cancelled = cancelled
+
+
+class JobFailed(BioMCPError):
+    """Raised when an EBI job returns a terminal FAILED / ERROR / NOT_FOUND status."""
+
+    def __init__(self, service: str, job_id: str, status: str) -> None:
+        super().__init__(f"{service} job {job_id} ended with status {status}.")
+        self.service = service
+        self.job_id = job_id
+        self.status = status
+
+
 def error_response(
     message: str,
     suggestions: list[str] | None = None,
