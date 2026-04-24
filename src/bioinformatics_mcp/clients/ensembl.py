@@ -107,6 +107,35 @@ class EnsemblClient:
         self._raise_for_status(response, identifier=variant_id)
         return response.json()
 
+    @retry(
+        retry=retry_if_exception_type((RateLimitExceeded, ExternalServiceDown)),
+        wait=wait_exponential(multiplier=0.5, min=0.5, max=8.0),
+        stop=stop_after_attempt(4),
+        reraise=True,
+    )
+    async def overlap_variation(
+        self,
+        species: str,
+        region: str,
+        *,
+        assembly: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return known variations overlapping a genomic region.
+
+        ``region`` is ``chr:start-end``. Ensembl returns every variation
+        that overlaps, not just exact-position matches; tool callers
+        filter by allele. Used by ``bio_fetch_variant`` when the input
+        is a coordinate string rather than an rsID.
+        """
+        base = _resolve_base(assembly)
+        response = await self._client.request(
+            "GET",
+            f"{base}/overlap/region/{species}/{region}",
+            params={"feature": "variation"},
+        )
+        self._raise_for_status(response, identifier=region)
+        return list(response.json())
+
     # ---- VEP ------------------------------------------------------------
 
     @retry(
