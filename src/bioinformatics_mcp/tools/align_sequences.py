@@ -60,10 +60,10 @@ ALIGNMENT_SOFT_CAP_BYTES = 200 * 1024
 
 # Map user-facing output_format → (EBI submission outfmt, EBI result-type ID,
 # AlignIO parser name). The result-type IDs follow EBI Job Dispatcher's
-# conventional "aln-" prefix naming (except "fa" → "aln-fasta"); these
-# are not enumerated anywhere that can be fetched without a live job
-# submission. Verify on first live run against /resulttypes/{jobId} and
-# update if wrong.
+# conventional "aln-" prefix naming. Verified on 2026-04-24 against live
+# EBI via scripts/probe_clustal_outfmts.py: each outfmt's native
+# result-type matches the map; a universal `fa` Seqret converter is also
+# present on every job regardless of outfmt.
 _OUTPUT_FORMAT_MAP: dict[str, tuple[str, str, str]] = {
     "clustal": ("clustal_num", "aln-clustal_num", "clustal"),
     "fasta": ("fa", "aln-fasta", "fasta"),

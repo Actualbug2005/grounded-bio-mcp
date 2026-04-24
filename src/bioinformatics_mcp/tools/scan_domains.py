@@ -5,16 +5,14 @@ Phase 2. See spec §4.13.
 Annotations: readOnlyHint=True, destructiveHint=False, openWorldHint=True,
 idempotentHint=True, title="Scan Protein Domains (InterProScan)".
 
-**Partial-results-on-timeout = HARD ERROR (tier-3).** The prompt's
-tier-2 investigation (does EBI return parseable partial TSV during a
-RUNNING job?) requires a live multi-database submission to verify; at
-implementation time EBI_EMAIL was unavailable so the probe was
-deferred. Falling back to hard error prevents fabricating a partial
-match list we can't verify. If a future run has EBI_EMAIL, re-run the
-tier-1/tier-2 probes per prompts/session-3-ebi-async.md §6 and, if
-real streaming exists, extend this tool with the
-`{matches, incomplete, databases_completed, databases_pending}` shape
-the prompt sketches.
+**Partial-results-on-timeout = HARD ERROR (tier-3) — VERIFIED 2026-04-24.**
+Tier-1 (/resulttypes during RUNNING) and tier-2 (/result/{jobId}/tsv
+during RUNNING) were probed against live EBI via
+`scripts/probe_iprscan_partial.py`. Both are negative: EBI returns
+HTTP 400 with a fixed XML "not finished" body throughout RUNNING, and
+`/resulttypes/{jobId}` raises non-200 until the job FINISHES. There
+is no partial-results path to surface, so the tier-3 hard error is
+the only correct behaviour. Do not invent a streaming branch.
 
 **Return shape:** plain ``dict[str, Any]`` — same pattern as align.
 
