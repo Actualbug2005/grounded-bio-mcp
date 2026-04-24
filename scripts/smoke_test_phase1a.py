@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Phase-1 end-to-end smoke test.
+"""End-to-end smoke test — phases 1 + 2 (11 tools).
 
-Calls every phase-1 tool (``bio_fetch_sequence``, ``bio_fetch_uniprot``,
+Calls every registered tool (``bio_fetch_sequence``, ``bio_fetch_uniprot``,
 ``bio_fetch_pdb``, ``bio_fetch_alphafold``, ``bio_align_sequences``,
-``bio_scan_domains``, ``bio_fetch_compound``, ``bio_fetch_bioactivity``)
+``bio_scan_domains``, ``bio_fetch_compound``, ``bio_fetch_bioactivity``,
+``bio_fetch_variant``, ``bio_predict_variant_effect``, ``bio_fetch_gene``)
 through the in-process FastMCP client — i.e. the same handshake path
 Claude would use — against real upstream APIs, with the spec §10.2
 test accessions. Prints a pass/fail summary and exits non-zero on any
@@ -142,6 +143,88 @@ def _build_cases() -> list[tuple[str, dict[str, Any], Any]]:
         )[-1]
 
     return [
+        (
+            "bio_fetch_variant",
+            {"identifier": "rs429358", "species": "human"},
+            lambda p: (
+                _assert(
+                    p.get("error") is not True,
+                    f"variant errored: {p.get('message')}",
+                ),
+                _assert(p["status"] == "found", f"status={p['status']}"),
+                _assert(
+                    p["variant"]["id"] == "rs429358",
+                    f"id={p['variant']['id']}",
+                ),
+                _assert(
+                    p["variant"]["most_severe_consequence"] == "missense_variant",
+                    f"msc={p['variant']['most_severe_consequence']}",
+                ),
+                _assert(
+                    p["annotation_richness"]["has_population_frequencies"],
+                    "no population frequencies on APOE ε4",
+                ),
+                f"rs429358 {p['assembly_used']} "
+                f"maf={p['variant']['maf']['value']:.3f} ({p['variant']['maf']['source']})",
+            )[-1],
+        ),
+        (
+            "bio_predict_variant_effect",
+            {
+                "variant": "ENSP00000252486.4:p.Cys130Arg",
+                "species": "human",
+            },
+            lambda p: (
+                _assert(
+                    p.get("error") is not True,
+                    f"VEP errored: {p.get('message')}",
+                ),
+                _assert(p["status"] == "predicted", f"status={p['status']}"),
+                _assert(
+                    p["most_severe_consequence"] == "missense_variant",
+                    f"msc={p['most_severe_consequence']}",
+                ),
+                _assert(
+                    any(
+                        tc.get("gene_symbol") == "APOE"
+                        for tc in p["transcript_consequences"]
+                    ),
+                    "APOE not in transcript_consequences",
+                ),
+                f"APOE missense; transcripts={len(p['transcript_consequences'])} "
+                f"format={p['input_format_used']}",
+            )[-1],
+        ),
+        (
+            "bio_fetch_gene",
+            {"identifier": "BRCA1", "organism": "Homo sapiens"},
+            lambda p: (
+                _assert(
+                    p.get("error") is not True,
+                    f"gene errored: {p.get('message')}",
+                ),
+                _assert(p["status"] == "found", f"status={p['status']}"),
+                _assert(
+                    p["gene"]["gene_id"] == "672",
+                    f"gene_id={p['gene']['gene_id']}",
+                ),
+                _assert(
+                    p["gene"]["chromosome"] == "17",
+                    f"chromosome={p['gene']['chromosome']}",
+                ),
+                _assert(
+                    len(p["gene"]["refseq_transcripts"]) > 0,
+                    "no RefSeq transcripts",
+                ),
+                _assert(
+                    len(p["gene"]["go_annotations"]) > 0,
+                    "no GO annotations",
+                ),
+                f"BRCA1 chr{p['gene']['chromosome']} "
+                f"transcripts={len(p['gene']['refseq_transcripts'])} "
+                f"GO={len(p['gene']['go_annotations'])}",
+            )[-1],
+        ),
         (
             "bio_align_sequences",
             {
@@ -301,6 +384,9 @@ async def run() -> int:
             "bio_scan_domains",
             "bio_fetch_compound",
             "bio_fetch_bioactivity",
+            "bio_fetch_variant",
+            "bio_predict_variant_effect",
+            "bio_fetch_gene",
         }
         missing = expected - names
         if missing:
@@ -313,7 +399,7 @@ async def run() -> int:
 
     passed = sum(1 for _, ok, _ in results if ok)
     total = len(results)
-    print(f"\nPhase-1 smoke test  —  {passed}/{total} passed\n")
+    print(f"\nPhase 1+2 smoke test  —  {passed}/{total} passed\n")
     for name, ok, detail in results:
         marker = "✓" if ok else "✗"
         print(f"  {marker} {name:24}  {detail}")
