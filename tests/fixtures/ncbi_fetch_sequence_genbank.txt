@@ -1,0 +1,26 @@
+LOCUS       NM_000001                180 bp    mRNA    linear   PRI 01-JAN-2026
+DEFINITION  Synthetic mRNA for unit testing (not a real RefSeq entry).
+ACCESSION   NM_000001
+VERSION     NM_000001.1
+KEYWORDS    RefSeq.
+SOURCE      Homo sapiens (human)
+  ORGANISM  Homo sapiens
+            Eukaryota; Metazoa; Chordata; Craniata.
+FEATURES             Location/Qualifiers
+     source          1..180
+                     /organism="Homo sapiens"
+                     /mol_type="mRNA"
+                     /db_xref="taxon:9606"
+     gene            1..180
+                     /gene="TEST1"
+                     /gene_synonym="FAKE"
+     CDS             1..180
+                     /gene="TEST1"
+                     /codon_start=1
+                     /product="synthetic test product"
+                     /protein_id="NP_000001.1"
+ORIGIN
+        1 atggcgaccc tggaaaagct gatgaaggcc ttcgagtccc tcaagtcctt ccagcagcag
+       61 cagcagcagc agcagcagca gcagcagcag caacagccgc cacctccgcc gccgccgccg
+      121 ccgccgcctc ctcagcttcc tcagccgccg ccgcaggcac agcctctcct cccgcagccg
+//
