@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Phase-1a/1b end-to-end smoke test.
+"""Phase-1 end-to-end smoke test.
 
-Calls every phase-1a/1b tool (``bio_fetch_sequence``, ``bio_fetch_uniprot``,
+Calls every phase-1 tool (``bio_fetch_sequence``, ``bio_fetch_uniprot``,
 ``bio_fetch_pdb``, ``bio_fetch_alphafold``, ``bio_align_sequences``,
-``bio_scan_domains``) through the in-process FastMCP client — i.e. the
-same handshake path Claude would use — against real upstream APIs, with
-the spec §10.2 test accessions. Prints a pass/fail summary and exits
-non-zero on any failure.
+``bio_scan_domains``, ``bio_fetch_compound``, ``bio_fetch_bioactivity``)
+through the in-process FastMCP client — i.e. the same handshake path
+Claude would use — against real upstream APIs, with the spec §10.2
+test accessions. Prints a pass/fail summary and exits non-zero on any
+failure.
 
 The two EBI async tools are gated on EBI_EMAIL: without it, they
 exercise the graceful "EBI_EMAIL required" error path rather than
@@ -158,6 +159,71 @@ def _build_cases() -> list[tuple[str, dict[str, Any], Any]]:
             },
             async_scan_assertion,
         ),
+        (
+            "bio_fetch_compound",
+            {
+                "identifier": "CHEMBL25",
+                "identifier_type": "chembl_id",
+                "source": "both",
+            },
+            lambda p: (
+                _assert(
+                    p.get("error") is not True,
+                    f"compound errored: {p.get('message')}",
+                ),
+                _assert(p["chembl_id"] == "CHEMBL25", f"chembl={p['chembl_id']}"),
+                _assert(
+                    p["pubchem_cid"] == 2244,
+                    f"pubchem_cid={p.get('pubchem_cid')}",
+                ),
+                _assert(
+                    set(p["sources_found"]) == {"chembl", "pubchem"},
+                    f"sources_found={p.get('sources_found')}",
+                ),
+                _assert(
+                    any(s.lower() == "aspirin" for s in p["synonyms"]),
+                    "aspirin not in synonyms",
+                ),
+                _assert(
+                    p["sources"].get("smiles") == "chembl",
+                    f"smiles provenance={p['sources'].get('smiles')}",
+                ),
+                f"{p['pref_name']} "
+                f"sources={sorted(p['sources_found'])} "
+                f"phase={p.get('clinical_phase')}",
+            )[-1],
+        ),
+        (
+            "bio_fetch_bioactivity",
+            {
+                "query_type": "compound",
+                "identifier": "CHEMBL25",
+                "max_results": 50,
+                "min_confidence": 7,
+            },
+            lambda p: (
+                _assert(
+                    p.get("error") is not True,
+                    f"bioactivity errored: {p.get('message')}",
+                ),
+                _assert(
+                    p["min_confidence_applied"] == 7,
+                    f"min_confidence={p['min_confidence_applied']}",
+                ),
+                _assert(
+                    p["page_meta"]["total_count"] > 0,
+                    "no activities returned",
+                ),
+                _assert(
+                    all(a["confidence_score"] >= 7 for a in p["activities"]),
+                    f"found cs<7 rows: {[a['confidence_score'] for a in p['activities'] if a['confidence_score'] < 7]}",
+                ),
+                f"total={p['page_meta']['total_count']} "
+                f"returned={p['page_meta']['returned_count']} "
+                f"null_excluded={p['null_confidence_excluded']} "
+                f"below_excluded={p['below_threshold_excluded']}",
+            )[-1],
+        ),
     ]
 
 
@@ -233,6 +299,8 @@ async def run() -> int:
             "bio_fetch_alphafold",
             "bio_align_sequences",
             "bio_scan_domains",
+            "bio_fetch_compound",
+            "bio_fetch_bioactivity",
         }
         missing = expected - names
         if missing:
@@ -245,7 +313,7 @@ async def run() -> int:
 
     passed = sum(1 for _, ok, _ in results if ok)
     total = len(results)
-    print(f"\nPhase-1a/1b smoke test  —  {passed}/{total} passed\n")
+    print(f"\nPhase-1 smoke test  —  {passed}/{total} passed\n")
     for name, ok, detail in results:
         marker = "✓" if ok else "✗"
         print(f"  {marker} {name:24}  {detail}")
