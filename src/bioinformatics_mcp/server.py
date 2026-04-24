@@ -28,9 +28,12 @@ from bioinformatics_mcp.clients.base import RATE_LIMITS
 from bioinformatics_mcp.clients.chembl import ChEMBLClient
 from bioinformatics_mcp.clients.ebi import EBIJobRunner
 from bioinformatics_mcp.clients.ensembl import EnsemblClient
+from bioinformatics_mcp.clients.europepmc import EuropePMCClient
 from bioinformatics_mcp.clients.ncbi import NCBIClient
 from bioinformatics_mcp.clients.pubchem import PubChemClient
 from bioinformatics_mcp.clients.rcsb import RCSBClient
+from bioinformatics_mcp.clients.reactome import ReactomeClient
+from bioinformatics_mcp.clients.string_db import StringDBClient
 from bioinformatics_mcp.clients.uniprot import UniProtClient
 from bioinformatics_mcp.config import get_settings
 from bioinformatics_mcp.tools.align_sequences import bio_align_sequences as _align_impl
@@ -42,6 +45,13 @@ from bioinformatics_mcp.tools.fetch_compound import (
     bio_fetch_compound as _compound_impl,
 )
 from bioinformatics_mcp.tools.fetch_gene import bio_fetch_gene as _gene_impl
+from bioinformatics_mcp.tools.fetch_interactions import (
+    bio_fetch_interactions as _interactions_impl,
+)
+from bioinformatics_mcp.tools.fetch_paper_fulltext import (
+    bio_fetch_paper_fulltext as _fulltext_impl,
+)
+from bioinformatics_mcp.tools.fetch_pathway import bio_fetch_pathway as _pathway_impl
 from bioinformatics_mcp.tools.fetch_pdb import fetch_pdb
 from bioinformatics_mcp.tools.fetch_sequence import fetch_sequence
 from bioinformatics_mcp.tools.fetch_uniprot import fetch_uniprot
@@ -50,6 +60,9 @@ from bioinformatics_mcp.tools.predict_variant_effect import (
     bio_predict_variant_effect as _vep_impl,
 )
 from bioinformatics_mcp.tools.scan_domains import bio_scan_domains as _scan_impl
+from bioinformatics_mcp.tools.search_literature import (
+    bio_search_literature as _literature_impl,
+)
 from bioinformatics_mcp.utils.errors import error_response
 from bioinformatics_mcp.utils.rate_limit import RateLimitedClient
 
@@ -85,6 +98,10 @@ Tool selection guide (spec §3):
 | "Where is gene X on the genome? What are its exons?" | bio_fetch_gene (NCBI)      | —                                        |
 | "Does variant rsXXX exist? What are its alleles/MAF?"| bio_fetch_variant (Ensembl)| bio_predict_variant_effect (for function)|
 | "What's the functional consequence of this variant?" | bio_predict_variant_effect | bio_fetch_variant (for population context)|
+| "Does paper X exist? Find papers about Y."           | bio_search_literature      | —                                        |
+| "What does paper X actually say?"                    | bio_fetch_paper_fulltext   | bio_search_literature (for candidate IDs)|
+| "What pathway is protein X in?"                      | bio_fetch_pathway          | bio_fetch_uniprot (for protein-level context)|
+| "What does protein X interact with?"                 | bio_fetch_interactions     | —                                        |
 
 bio_fetch_compound answers "what IS this compound" — SMILES, InChI, MW,
 LogP, clinical phase, synonyms — from ChEMBL (drug-curated) and PubChem
@@ -120,10 +137,44 @@ regulatory_feature, intergenic) so callers don't special-case based
 on where the variant falls; SIFT and PolyPhen scores come through when
 Ensembl provides them.
 
-Phase 1 exposed eight tools. Phase 2 adds bio_fetch_gene,
-bio_fetch_variant, and bio_predict_variant_effect (spec §4.11, §4.12,
-§4.16) — 11 tools total. Later phases add BLAST, CRISPR guide design,
-literature, pathways, and interactions.
+bio_search_literature answers "does paper X exist? what papers discuss
+Y?" — Europe PMC search with free-text or MeSH terms, year range, and
+open-access filter. Each hit carries fulltext_available so callers know
+which ones can be followed up on with bio_fetch_paper_fulltext. This is
+the front door to citation verification — do NOT pattern-match paper
+titles or DOIs from training data, use this tool.
+
+bio_fetch_paper_fulltext answers "what does paper X actually say?" —
+Europe PMC JATS fulltext retrieval with an honest four-state
+availability enum (full_xml / abstract_only / metadata_only / not_found)
+plus a fulltext_unavailable_reason when fulltext is not retrievable.
+Sections are a flat list of {title, level, text}; callers can filter
+to specific sections (e.g. ["Methods"]). The tool NEVER fabricates
+content for unavailable papers — if we only have an abstract, we return
+the abstract and say so.
+
+bio_fetch_pathway answers "what pathway is protein X in? what is
+pathway R-HSA-nnnnnn?" — Reactome Content Service with three input
+modes (pathway_id, uniprot, gene_symbol). Strict species filtering by
+default; cross_species=True surfaces candidate_pathways for
+disambiguation when a symbol exists in multiple organisms.
+
+bio_fetch_interactions answers "what does protein X interact with?" —
+STRING interaction partners with a seven-channel evidence breakdown
+(neighbourhood, fusion, co_occurrence, coexpression, experimental,
+database, textmining). SCORE SCALE: input min_score is 0-1000 (so 700
+means 0.7 threshold); output scores are 0-1. Every response echoes
+score_scale so the distinction is visible in structured output.
+Default min_score=700 is high confidence; use 400 for medium, 900
+for highest. DO NOT fabricate protein-protein interactions from
+training data — use this tool.
+
+Phase 1 exposed eight tools. Phase 2 added bio_fetch_gene,
+bio_fetch_variant, and bio_predict_variant_effect. Phase 3 adds
+bio_search_literature, bio_fetch_paper_fulltext (spec §4.14, §4.15),
+bio_fetch_pathway (§4.17), and bio_fetch_interactions (§4.18) —
+15 tools total. Later phases add BLAST, CRISPR guide design, and
+codon optimisation.
 
 Confidence caveats (anti-hallucination):
   - AlphaFold predictions include per-residue pLDDT; regions with pLDDT < 70
@@ -202,6 +253,23 @@ def _pubchem_client() -> PubChemClient:
 @lru_cache(maxsize=1)
 def _ensembl_client() -> EnsemblClient:
     return EnsemblClient()
+
+
+@lru_cache(maxsize=1)
+def _europepmc_client() -> EuropePMCClient:
+    return EuropePMCClient()
+
+
+@lru_cache(maxsize=1)
+def _reactome_client() -> ReactomeClient:
+    return ReactomeClient()
+
+
+@lru_cache(maxsize=1)
+def _string_client() -> StringDBClient:
+    # STRING_USER_EMAIL is optional (unlike EBI_EMAIL); missing email
+    # only produces a warning at client init. See `clients/string_db.py`.
+    return StringDBClient(user_email=get_settings().string_user_email)
 
 
 @lru_cache(maxsize=1)
@@ -595,6 +663,166 @@ async def bio_fetch_gene(
         identifier=identifier,
         organism=organism,
         client=_ncbi_client(),
+    )
+
+
+@mcp.tool(
+    title="Search Literature (Europe PMC)",
+    annotations={
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "openWorldHint": True,
+        # Europe PMC continuously indexes new papers; the same query
+        # yields different ranked results over time.
+        "idempotentHint": False,
+    },
+)
+async def bio_search_literature(
+    query: str,
+    max_results: int = 20,
+    open_access_only: bool = False,
+    year_from: int | None = None,
+    year_to: int | None = None,
+) -> dict[str, Any]:
+    """Search Europe PMC for papers matching a query.
+
+    Accepts free text, MeSH terms, or prefixed forms like
+    ``DOI:10.1038/srep35251`` or ``AUTH:"Miyazaki T"``. Each hit carries
+    metadata (title, authors, journal, year, DOI, PMID, PMC ID,
+    abstract) plus a ``fulltext_available`` flag so callers know which
+    papers can be followed up on with ``bio_fetch_paper_fulltext``.
+    ``year_from`` / ``year_to`` bound publication year; ``open_access_only``
+    restricts to papers with OPEN_ACCESS status at Europe PMC.
+
+    Zero hits is an honest ``status="found"`` with an empty papers list
+    — "no matches" is never conflated with "lookup failed".
+    """
+    return await _literature_impl(
+        query=query,
+        max_results=max_results,
+        open_access_only=open_access_only,
+        year_from=year_from,
+        year_to=year_to,
+        client=_europepmc_client(),
+    )
+
+
+@mcp.tool(
+    title="Fetch Paper Full Text",
+    annotations=_READ_ONLY_ANNOTATIONS,
+)
+async def bio_fetch_paper_fulltext(
+    identifier: str,
+    identifier_type: Literal["pmc", "doi"],
+    sections: list[str] | None = None,
+) -> dict[str, Any]:
+    """Fetch full text of an open-access paper from Europe PMC.
+
+    Returns a four-state ``availability`` enum so callers can tell
+    exactly what they got:
+
+    * ``full_xml`` — JATS full text retrieved; ``sections`` is a flat
+      list of ``{title, level, text}`` with level=1 for top-level
+      sections and level>=2 for subsections. ``figures`` carries
+      label + caption per figure.
+    * ``abstract_only`` — paper exists but fulltext is unreachable;
+      ``fulltext_unavailable_reason`` explains why (``"paper not in
+      PMC"``, ``"PMC ID exists but fulltext XML returned 404"``, or
+      ``"closed-access paper"``).
+    * ``metadata_only`` — paper resolves with no abstract and no
+      fulltext.
+    * ``not_found`` — identifier did not resolve in Europe PMC.
+
+    ``sections`` filter is optional case-insensitive substring match
+    on level=1 section titles (e.g. ``["Methods"]``). The tool NEVER
+    fabricates content for unavailable papers — we return what we
+    have and say what we do not. This is the anti-hallucination
+    surface for citation verification.
+    """
+    return await _fulltext_impl(
+        identifier=identifier,
+        identifier_type=identifier_type,
+        sections=sections,
+        client=_europepmc_client(),
+    )
+
+
+@mcp.tool(
+    title="Fetch Reactome Pathway",
+    annotations=_READ_ONLY_ANNOTATIONS,
+)
+async def bio_fetch_pathway(
+    identifier: str,
+    identifier_type: Literal["pathway_id", "gene_symbol", "uniprot"],
+    species: str = "Homo sapiens",
+    cross_species: bool = False,
+) -> dict[str, Any]:
+    """Fetch Reactome pathway data.
+
+    Three input modes:
+
+    * ``identifier_type='pathway_id'`` — Reactome stable ID
+      (e.g. ``R-HSA-109581`` for Apoptosis); returns the full
+      pathway record (name, species, summary, GO biological process,
+      literature references, figures, release date).
+    * ``identifier_type='uniprot'`` — UniProt accession; returns all
+      Reactome pathways containing that protein for the given species.
+    * ``identifier_type='gene_symbol'`` — gene symbol; runs
+      ``/search/query`` and returns matching pathways. Strict species
+      filtering by default (only the requested species); pass
+      ``cross_species=True`` to surface ``candidate_pathways`` from
+      all species for disambiguation (same pattern as
+      ``bio_fetch_gene`` and ``bio_fetch_compound``).
+    """
+    return await _pathway_impl(
+        identifier=identifier,
+        identifier_type=identifier_type,
+        species=species,
+        cross_species=cross_species,
+        client=_reactome_client(),
+    )
+
+
+@mcp.tool(
+    title="Fetch STRING Interactions",
+    annotations=_READ_ONLY_ANNOTATIONS,
+)
+async def bio_fetch_interactions(
+    identifier: str,
+    species_taxon: int = 9606,
+    min_score: int = 700,
+    max_partners: int = 20,
+) -> dict[str, Any]:
+    """Fetch STRING protein-protein interaction partners.
+
+    **SCORE SCALE — critical, surfaces in every response:**
+    ``min_score`` is on the **0-1000 input scale** (700 = 0.7
+    threshold). Output ``combined_score`` and the seven evidence
+    sub-scores are on the **0-1 scale**. Every response carries a
+    ``score_scale`` field so the distinction is visible in
+    structured output. A request for ``min_score=0`` or ``min_score=1``
+    is rejected — you almost certainly confused the scales; spec
+    §4.18 clamps to 150-1000.
+
+    Defaults: ``species_taxon=9606`` (human; 10090=mouse, 9685=cat);
+    ``min_score=700`` (high confidence, 900=highest, 400=medium);
+    ``max_partners=20``.
+
+    Output includes seven evidence channels per edge
+    (``neighbourhood``, ``fusion``, ``co_occurrence``, ``coexpression``,
+    ``experimental``, ``database``, ``textmining``) so callers can
+    distinguish directly-observed experimental interactions from
+    text-mining co-occurrence. Zero sub-scores are preserved —
+    presence of 0 means "STRING knows this channel does not
+    contribute"; absence would mean "we do not know whether it was
+    evaluated".
+    """
+    return await _interactions_impl(
+        identifier=identifier,
+        species_taxon=species_taxon,
+        min_score=min_score,
+        max_partners=max_partners,
+        client=_string_client(),
     )
 
 
