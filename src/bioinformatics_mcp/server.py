@@ -25,13 +25,18 @@ from fastmcp import FastMCP
 from bioinformatics_mcp import __version__
 from bioinformatics_mcp.clients.alphafold import AlphaFoldClient
 from bioinformatics_mcp.clients.base import RATE_LIMITS
+from bioinformatics_mcp.clients.chembl import ChEMBLClient
 from bioinformatics_mcp.clients.ebi import EBIJobRunner
 from bioinformatics_mcp.clients.ncbi import NCBIClient
+from bioinformatics_mcp.clients.pubchem import PubChemClient
 from bioinformatics_mcp.clients.rcsb import RCSBClient
 from bioinformatics_mcp.clients.uniprot import UniProtClient
 from bioinformatics_mcp.config import get_settings
 from bioinformatics_mcp.tools.align_sequences import bio_align_sequences as _align_impl
 from bioinformatics_mcp.tools.fetch_alphafold import fetch_alphafold
+from bioinformatics_mcp.tools.fetch_compound import (
+    bio_fetch_compound as _compound_impl,
+)
 from bioinformatics_mcp.tools.fetch_pdb import fetch_pdb
 from bioinformatics_mcp.tools.fetch_sequence import fetch_sequence
 from bioinformatics_mcp.tools.fetch_uniprot import fetch_uniprot
@@ -66,11 +71,22 @@ Tool selection guide (spec §3):
 | "What's the AlphaFold prediction for X?"             | bio_fetch_alphafold        | —                                        |
 | "How similar are these N sequences?"                 | bio_align_sequences        | —                                        |
 | "Does this uncharacterised protein have Pfam hits?"  | bio_scan_domains           | bio_fetch_uniprot (if curated)           |
+| "What are the properties / structure of compound X?" | bio_fetch_compound         | bio_fetch_bioactivity (for binding data) |
+| "What does compound X bind to, and how tightly?"     | bio_fetch_bioactivity      | bio_fetch_compound (for structure first) |
 
-Phase 1a + 1b exposes six tools: bio_fetch_sequence, bio_fetch_uniprot,
-bio_fetch_pdb, bio_fetch_alphafold, bio_align_sequences, bio_scan_domains.
-Later phases add BLAST, CRISPR guide design, compound/bioactivity, variants,
-literature, pathways, and interactions.
+bio_fetch_compound answers "what IS this compound" — SMILES, InChI, MW,
+LogP, clinical phase, synonyms — from ChEMBL (drug-curated) and PubChem
+(broad chemistry) with explicit per-field provenance.
+
+bio_fetch_bioactivity answers "what does this compound DO" — measured
+IC50/Ki/Kd values against named targets, filtered to ChEMBL confidence
+≥ 7 by default so low-quality assays aren't cited as binding affinities.
+Do NOT pattern-match drug target or affinity values from training data
+— use this tool.
+
+Phase 1 exposes eight tools: the six above plus bio_fetch_compound and
+bio_fetch_bioactivity. Later phases add BLAST, CRISPR guide design,
+variants, literature, pathways, and interactions.
 
 Confidence caveats (anti-hallucination):
   - AlphaFold predictions include per-residue pLDDT; regions with pLDDT < 70
@@ -134,6 +150,16 @@ def _ebi_client() -> RateLimitedClient:
         timeout=60.0,
         headers={"User-Agent": "bioinformatics-mcp/0.2 (+ebi-jobdispatcher)"},
     )
+
+
+@lru_cache(maxsize=1)
+def _chembl_client() -> ChEMBLClient:
+    return ChEMBLClient()
+
+
+@lru_cache(maxsize=1)
+def _pubchem_client() -> PubChemClient:
+    return PubChemClient()
 
 
 @lru_cache(maxsize=1)
@@ -340,6 +366,42 @@ async def bio_scan_domains(
         max_wait_seconds=max_wait_seconds,
         runner=_iprscan5_runner(),
         email=email,
+    )
+
+
+@mcp.tool(
+    title="Fetch Compound Data (ChEMBL + PubChem)",
+    annotations=_READ_ONLY_ANNOTATIONS,
+)
+async def bio_fetch_compound(
+    identifier: str,
+    identifier_type: Literal[
+        "name", "smiles", "inchi", "chembl_id", "pubchem_cid"
+    ],
+    source: Literal["chembl", "pubchem", "both"] = "both",
+) -> dict[str, Any]:
+    """Fetch structured compound data (SMILES, InChI, MW, LogP, clinical phase, synonyms).
+
+    Queries ChEMBL (drug-curated) and/or PubChem (broad chemistry). When
+    ``source='both'`` the two databases are queried in parallel where
+    possible; ChEMBL wins on fields both sources provide (SMILES, InChI,
+    formula, MW, LogP, H-bond counts, rotatable bonds). Per-field
+    provenance under ``sources``.
+
+    PubChem name lookups may return multiple CIDs (stereoisomer/salt
+    families). In that case the first CID is used and
+    ``candidate_pubchem_cids`` + ``disambiguation_hint`` are surfaced so
+    a follow-up query can pick a specific member.
+
+    For measured target binding data on this compound, follow up with
+    ``bio_fetch_bioactivity``.
+    """
+    return await _compound_impl(
+        identifier=identifier,
+        identifier_type=identifier_type,
+        source=source,
+        chembl=_chembl_client(),
+        pubchem=_pubchem_client(),
     )
 
 
