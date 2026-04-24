@@ -1,0 +1,35 @@
+{
+  "rcsb_id": "1CRN",
+  "struct": {
+    "title": "WATER STRUCTURE OF A HYDROPHOBIC PROTEIN AT ATOMIC RESOLUTION"
+  },
+  "rcsb_accession_info": {
+    "deposit_date": "1981-04-30T00:00:00Z",
+    "initial_release_date": "1981-10-15T00:00:00Z",
+    "revision_date": "2024-05-22T00:00:00Z"
+  },
+  "rcsb_entry_info": {
+    "resolution_combined": [1.5],
+    "experimental_method": "X-ray",
+    "molecular_weight": 4.736,
+    "polymer_entity_count_protein": 1,
+    "polymer_entity_count_nucleic_acid": 0
+  },
+  "rcsb_entry_container_identifiers": {
+    "polymer_entity_ids": ["1"],
+    "non_polymer_entity_ids": [],
+    "assembly_ids": ["1"]
+  },
+  "exptl": [
+    {"method": "X-RAY DIFFRACTION"}
+  ],
+  "refine": [
+    {
+      "ls_R_factor_R_work": 0.114,
+      "ls_R_factor_R_free": null
+    }
+  ],
+  "symmetry": {
+    "space_group_name_H_M": "P 1 21 1"
+  }
+}
