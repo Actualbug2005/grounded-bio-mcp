@@ -27,6 +27,7 @@ from bioinformatics_mcp.utils.errors import (
     RateLimitExceeded,
     error_response,
 )
+from bioinformatics_mcp.utils.formatting import soft_cap_with_url_fallback
 
 # Spec approval: 2 MB inline cap. Covers the vast majority of PDB entries
 # while protecting against ribosome-scale payloads (25 MB+). Counted in
@@ -196,16 +197,17 @@ async def fetch_pdb(
                 f"CIF file for '{params.pdb_id}' not available at files.rcsb.org."
             )
         else:
-            size = len(cif_text.encode("utf-8"))
-            if size > COORDINATES_SOFT_CAP_BYTES:
-                result["coordinates_error"] = (
-                    f"Structure too large to inline ({size // 1024} KB, cap "
-                    f"{COORDINATES_SOFT_CAP_BYTES // 1024} KB). Fetch directly from "
-                    f"https://files.rcsb.org/download/{params.pdb_id.lower()}.cif"
+            result.update(
+                soft_cap_with_url_fallback(
+                    cif_text,
+                    cap_bytes=COORDINATES_SOFT_CAP_BYTES,
+                    fallback_url=(
+                        f"https://files.rcsb.org/download/{params.pdb_id.lower()}.cif"
+                    ),
+                    key_prefix="coordinates",
+                    format_label="mmCIF",
+                    overage_noun="Structure",
                 )
-            else:
-                result["coordinates_format"] = "mmCIF"
-                result["coordinates"] = cif_text
-                result["coordinates_size_bytes"] = size
+            )
 
     return result
