@@ -5,9 +5,12 @@ fetches from primary databases — NCBI, UniProt, EBI, Ensembl, AlphaFold DB,
 RCSB PDB, ChEMBL, PubChem, Europe PMC, Reactome, STRING — instead of letting a
 model pattern-match from training data.
 
-**Status:** Phase 1 scaffolding. Shared infrastructure is in; no tools are
-implemented yet. See [`bioinformatics-mcp-spec.md`](./bioinformatics-mcp-spec.md)
-for the full specification.
+**Status:** 18 of 19 tools live and registered. The remaining tool
+(`bio_design_grna`, CRISPOR-backed gRNA design with off-target analysis)
+lands later in Session 8a; LXC deployment + evaluation harness follow in
+Session 8b. See [`bioinformatics-mcp-spec.md`](./bioinformatics-mcp-spec.md)
+for the full specification and [`project-handoff.md`](./project-handoff.md)
+for the per-session brief.
 
 ---
 
@@ -38,7 +41,7 @@ pytest
 RUN_INTEGRATION=1 pytest -m integration
 ```
 
-Once tools are implemented, the server is launched via:
+The server is launched via:
 
 ```bash
 bioinformatics-mcp        # streamable-HTTP on MCP_BIND_HOST:MCP_BIND_PORT
@@ -58,7 +61,7 @@ See spec §5 for the canonical tree. Top-level overview:
 
 ```
 src/bioinformatics_mcp/
-  server.py          # FastMCP app + tool registration (TODO)
+  server.py          # FastMCP app + tool registration
   config.py          # env var loading via pydantic-settings
   clients/           # one module per upstream API
   tools/             # one module per `bio_{action}_{resource}` tool
