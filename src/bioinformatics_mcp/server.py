@@ -37,6 +37,9 @@ from bioinformatics_mcp.clients.string_db import StringDBClient
 from bioinformatics_mcp.clients.uniprot import UniProtClient
 from bioinformatics_mcp.config import get_settings
 from bioinformatics_mcp.tools.align_sequences import bio_align_sequences as _align_impl
+from bioinformatics_mcp.tools.codon_optimise import (
+    bio_codon_optimise as _codon_optimise_impl,
+)
 from bioinformatics_mcp.tools.fetch_alphafold import fetch_alphafold
 from bioinformatics_mcp.tools.fetch_bioactivity import (
     bio_fetch_bioactivity as _bioactivity_impl,
@@ -102,6 +105,7 @@ Tool selection guide (spec §3):
 | "What does paper X actually say?"                    | bio_fetch_paper_fulltext   | bio_search_literature (for candidate IDs)|
 | "What pathway is protein X in?"                      | bio_fetch_pathway          | bio_fetch_uniprot (for protein-level context)|
 | "What does protein X interact with?"                 | bio_fetch_interactions     | —                                        |
+| "Design a DNA sequence to express protein X in host Y." | bio_codon_optimise      | —                                        |
 
 bio_fetch_compound answers "what IS this compound" — SMILES, InChI, MW,
 LogP, clinical phase, synonyms — from ChEMBL (drug-curated) and PubChem
@@ -169,12 +173,22 @@ Default min_score=700 is high confidence; use 400 for medium, 900
 for highest. DO NOT fabricate protein-protein interactions from
 training data — use this tool.
 
+bio_codon_optimise answers "design a DNA sequence to express this
+protein in host Y" — greedy frequency-max codon optimisation against
+six expression-host codon usage tables (E. coli, human, S. cerevisiae,
+P. pastoris, CHO, Sf9), with synonymous-codon swaps to avoid forbidden
+restriction sites. Reports CAI, GC%, rare-codon count, and any
+restriction-site conflicts that survived (genuinely unavoidable). The
+ONLY tool with openWorldHint=False — no upstream API, all data ships
+locally (python-codon-tables for three organisms; bundled Kazusa CSVs
+for the other three under data/codon_tables/).
+
 Phase 1 exposed eight tools. Phase 2 added bio_fetch_gene,
-bio_fetch_variant, and bio_predict_variant_effect. Phase 3 adds
+bio_fetch_variant, and bio_predict_variant_effect. Phase 3 added
 bio_search_literature, bio_fetch_paper_fulltext (spec §4.14, §4.15),
-bio_fetch_pathway (§4.17), and bio_fetch_interactions (§4.18) —
-15 tools total. Later phases add BLAST, CRISPR guide design, and
-codon optimisation.
+bio_fetch_pathway (§4.17), and bio_fetch_interactions (§4.18). Phase 3
+final: bio_codon_optimise (§4.19). Final tool remaining is bio_design_grna
+(CRISPOR, §4.7).
 
 Confidence caveats (anti-hallucination):
   - AlphaFold predictions include per-residue pLDDT; regions with pLDDT < 70
@@ -189,6 +203,17 @@ _READ_ONLY_ANNOTATIONS: dict[str, bool] = {
     "readOnlyHint": True,
     "destructiveHint": False,
     "openWorldHint": True,
+    "idempotentHint": True,
+}
+
+# bio_codon_optimise is the *only* tool that does not query external state —
+# everything resolves from python-codon-tables and the bundled Kazusa CSVs.
+# That's why openWorldHint flips to False here. idempotentHint=True because
+# the frequency_max algorithm is fully deterministic for fixed inputs.
+_CODON_OPTIMISE_ANNOTATIONS: dict[str, bool] = {
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "openWorldHint": False,
     "idempotentHint": True,
 }
 
@@ -823,6 +848,44 @@ async def bio_fetch_interactions(
         min_score=min_score,
         max_partners=max_partners,
         client=_string_client(),
+    )
+
+
+@mcp.tool(
+    title="Codon-Optimise Sequence",
+    annotations=_CODON_OPTIMISE_ANNOTATIONS,
+)
+async def bio_codon_optimise(
+    protein_sequence: str,
+    target_organism: Literal[
+        "ecoli_k12", "h_sapiens", "s_cerevisiae", "p_pastoris", "cho", "sf9"
+    ],
+    avoid_restriction_sites: list[str] | None = None,
+) -> dict[str, Any]:
+    """Codon-optimise a protein for one of six recombinant expression hosts.
+
+    Greedy frequency-max algorithm: for each residue picks the
+    organism's highest-frequency codon, swapping to a synonym only when
+    the top pick would introduce a forbidden restriction site.
+    Synonymous swaps that still leave a forbidden site (rare; usually
+    means the only synonyms all carry the site) are reported in
+    ``restriction_conflicts`` so callers see the constraint failed
+    honestly rather than getting a silently-bad sequence.
+
+    Returns ``optimised_sequence`` (DNA, with the highest-frequency stop
+    codon appended), ``codon_adaptation_index`` (Sharp & Li 1987 over
+    non-stop codons), ``gc_content_pct``, ``rare_codon_count`` (per-AA
+    relative frequency < 0.1), and ``restriction_conflicts``.
+
+    The ONLY tool with ``openWorldHint=False``: codon usage tables ship
+    locally (three from ``python-codon-tables``, three bundled Kazusa
+    CSVs under ``data/codon_tables/``), so output is fully reproducible
+    and the tool has no upstream dependency at runtime.
+    """
+    return await _codon_optimise_impl(
+        protein_sequence=protein_sequence,
+        target_organism=target_organism,
+        avoid_restriction_sites=avoid_restriction_sites,
     )
 
 
