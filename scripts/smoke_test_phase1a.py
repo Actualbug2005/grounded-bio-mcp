@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end smoke test — phases 1 + 2 + 3 (17 tools).
+"""End-to-end smoke test — phases 1 + 2 + 3 + Session 8a fold (18 tools).
 
 Calls every registered tool (``bio_fetch_sequence``, ``bio_fetch_uniprot``,
 ``bio_fetch_pdb``, ``bio_fetch_alphafold``, ``bio_align_sequences``,
@@ -7,11 +7,11 @@ Calls every registered tool (``bio_fetch_sequence``, ``bio_fetch_uniprot``,
 ``bio_fetch_variant``, ``bio_predict_variant_effect``, ``bio_fetch_gene``,
 ``bio_search_literature``, ``bio_fetch_paper_fulltext``,
 ``bio_fetch_pathway``, ``bio_fetch_interactions``, ``bio_blast_search``,
-``bio_codon_optimise``) through the in-process FastMCP client — i.e.
-the same handshake path Claude would use — against real upstream APIs
-(except ``bio_codon_optimise`` which is purely local), with the spec
-§10.2 test accessions. Prints a pass/fail summary and exits non-zero
-on any failure.
+``bio_codon_optimise``, ``bio_fold_sequence``) through the in-process
+FastMCP client — i.e. the same handshake path Claude would use — against
+real upstream APIs (except ``bio_codon_optimise`` and ``bio_fold_sequence``
+which are purely local), with the spec §10.2 test accessions. Prints a
+pass/fail summary and exits non-zero on any failure.
 
 The BLAST smoke can run several minutes during NCBI peak hours; the
 case sets ``max_wait_seconds=900`` to give NCBI head-room.
@@ -512,6 +512,47 @@ def _build_cases() -> list[tuple[str, dict[str, Any], Any]]:
                 f"top accession={p['hits'][0]['accession']}",
             )[-1],
         ),
+        (
+            "bio_fold_sequence",
+            {
+                # Yeast tRNA-Phe — 76 nt textbook cloverleaf. ViennaRNA 2.7.2
+                # / Turner 2004 at 37 °C gives MFE -22.40 kcal/mol with 21
+                # base pairs forming the four-helix structure. Local-only
+                # tool (no upstream API), so this run is fully deterministic.
+                "sequence": (
+                    "GCGGAUUUAGCUCAGUUGGGAGAGCGCCAGACUGAAGAUCUGGAGGUCCUGUGUUCG"
+                    "AUCCACAGAAUUCGCACCA"
+                ),
+                "sequence_type": "rna",
+                "temperature": 37.0,
+            },
+            lambda p: (
+                _assert(
+                    p.get("error") is not True,
+                    f"fold_sequence errored: {p.get('message')}",
+                ),
+                _assert(p["length"] == 76, f"length={p['length']}, expected 76"),
+                _assert(
+                    p["mfe_kcal_per_mol"] < -15.0,
+                    f"tRNA-Phe MFE should be strongly negative; got {p['mfe_kcal_per_mol']}",
+                ),
+                _assert(
+                    p["structure"].count("(") >= 18,
+                    f"cloverleaf should have ~21 base pairs; got "
+                    f"{p['structure'].count('(')} from {p['structure']!r}",
+                ),
+                _assert(
+                    p["provenance"]["source"] == "ViennaRNA",
+                    f"provenance.source={p['provenance'].get('source')}",
+                ),
+                _assert(
+                    p["provenance"]["parameter_set"] == "Turner 2004 (RNA)",
+                    f"parameter_set={p['provenance'].get('parameter_set')}",
+                ),
+                f"tRNA-Phe MFE={p['mfe_kcal_per_mol']} bp={p['structure'].count('(')} "
+                f"viennarna={p['provenance']['viennarna_version']}",
+            )[-1],
+        ),
     ]
 
 
@@ -598,6 +639,7 @@ async def run() -> int:
             "bio_fetch_interactions",
             "bio_blast_search",
             "bio_codon_optimise",
+            "bio_fold_sequence",
         }
         missing = expected - names
         if missing:
