@@ -8,7 +8,20 @@ idempotentHint=True, title="Fold RNA/DNA Sequence".
 openWorldHint=False because the computation is purely local (ViennaRNA
 bindings) — no upstream API touched.
 
-# TODO: implement per spec §4.8 (ViennaRNA Python bindings; for DNA use
-# RNA.params_load_DNA_Mathews2004(); return MFE dot-bracket + ΔG + base-pairing
-# probability summary).
+Implementation lands in the next commit per Session 8a TDD discipline.
+This stub exists only so the RED-phase test fails with a real
+AssertionError on schema, not an ImportError on the missing symbol.
 """
+
+from __future__ import annotations
+
+from typing import Any
+
+
+async def bio_fold_sequence(
+    sequence: str,
+    sequence_type: str,
+    temperature: float = 37.0,
+) -> dict[str, Any]:
+    """Stub — see module docstring."""
+    return {}
