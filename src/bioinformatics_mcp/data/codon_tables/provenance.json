@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "source": "Kazusa Codon Usage Database (http://www.kazusa.or.jp/codon/)",
+  "tables": [
+    {
+      "spec_alias": "p_pastoris",
+      "filename": "p_pastoris_4922.csv",
+      "kazusa_taxid_used": 4922,
+      "kazusa_taxid_candidates": [
+        644223,
+        4922
+      ],
+      "kazusa_url": "http://www.kazusa.or.jp/codon/cgi-bin/showcodon.cgi?aa=1&style=N&species=4922",
+      "scientific_name": "Komagataella phaffii",
+      "common_name": "Pichia pastoris (renamed; yeast expression host)",
+      "ncbi_taxon_id": 460519,
+      "sha256": "f9908a06beea4a551c34e154e36ea306d37f944f466e3c7a856c3b889dd67bd8",
+      "downloaded_at_utc": "2026-04-25T10:33:16+00:00",
+      "downloader": "scripts/fetch_codon_tables.py",
+      "library_format": "python-codon-tables CSV (amino_acid,codon,relative_frequency)"
+    },
+    {
+      "spec_alias": "cho",
+      "filename": "cho_10029.csv",
+      "kazusa_taxid_used": 10029,
+      "kazusa_taxid_candidates": [
+        10029
+      ],
+      "kazusa_url": "http://www.kazusa.or.jp/codon/cgi-bin/showcodon.cgi?aa=1&style=N&species=10029",
+      "scientific_name": "Cricetulus griseus",
+      "common_name": "Chinese hamster (CHO cell host)",
+      "ncbi_taxon_id": 10029,
+      "sha256": "35bfff07031a16174db08d4921ebc17000633b474b951e5d56910dd0fed7026f",
+      "downloaded_at_utc": "2026-04-25T10:33:16+00:00",
+      "downloader": "scripts/fetch_codon_tables.py",
+      "library_format": "python-codon-tables CSV (amino_acid,codon,relative_frequency)"
+    },
+    {
+      "spec_alias": "sf9",
+      "filename": "sf9_7108.csv",
+      "kazusa_taxid_used": 7108,
+      "kazusa_taxid_candidates": [
+        7108
+      ],
+      "kazusa_url": "http://www.kazusa.or.jp/codon/cgi-bin/showcodon.cgi?aa=1&style=N&species=7108",
+      "scientific_name": "Spodoptera frugiperda",
+      "common_name": "Fall armyworm (Sf9 cell host)",
+      "ncbi_taxon_id": 7108,
+      "sha256": "1683b2b8646938559fba1a9f4abbd018910f0a551ece8a6075d45e80b32e4a41",
+      "downloaded_at_utc": "2026-04-25T10:33:18+00:00",
+      "downloader": "scripts/fetch_codon_tables.py",
+      "library_format": "python-codon-tables CSV (amino_acid,codon,relative_frequency)"
+    }
+  ]
+}
