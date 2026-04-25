@@ -13,6 +13,7 @@ import pytest
 from bioinformatics_mcp.tools.codon_optimise import (
     SUPPORTED_ORGANISMS,
     _load_codon_table,
+    _optimise_frequency_max,
 )
 
 
@@ -64,3 +65,76 @@ def test_load_codon_table_unknown_organism_raises_value_error() -> None:
     # Sanity: every supported alias actually loads.
     for alias in SUPPORTED_ORGANISMS:
         _load_codon_table(alias)
+
+
+# ---- frequency-max optimiser --------------------------------------------
+
+
+def test_optimise_frequency_max_single_methionine() -> None:
+    """Single-residue protein 'M' must round-trip to ATG (only Met codon)
+    plus the most-frequent stop. With no avoid_sites, conflicts list is
+    empty.
+    """
+    table = _load_codon_table("ecoli_k12")
+    dna, conflicts = _optimise_frequency_max("M", table, avoid_sites=[])
+    # Most-frequent E. coli stop is TAA at ~0.64; the implementation must
+    # append it to give a translation-ready ORF.
+    assert dna == "ATGTAA"
+    assert conflicts == []
+
+
+def test_optimise_frequency_max_picks_top_codon_per_residue() -> None:
+    """For ML in E. coli: Met → ATG (only choice), Leu → CTG (top freq 0.5),
+    plus stop TAA. Confirms the per-residue greedy pick is correct.
+    """
+    table = _load_codon_table("ecoli_k12")
+    dna, conflicts = _optimise_frequency_max("ML", table, avoid_sites=[])
+    assert dna == "ATGCTGTAA"
+    assert conflicts == []
+
+
+def test_optimise_frequency_max_rejects_invalid_amino_acid() -> None:
+    """Pydantic regex catches this at the schema layer in the tool, but the
+    bare optimiser must also fail loud rather than silently emit a partial
+    sequence — this matches the project's anti-hallucination ethos.
+    """
+    table = _load_codon_table("ecoli_k12")
+    with pytest.raises(ValueError, match="Unrecognised amino-acid 'Z'"):
+        _optimise_frequency_max("MZ", table, avoid_sites=[])
+
+
+def test_optimise_frequency_max_avoids_restriction_site_via_synonymous_swap() -> None:
+    """E. coli naive top picks for 'LQ' produce CTG+CAG = CTGCAG, which
+    is a PstI recognition site. The optimiser must swap one of the two
+    codons to a synonym so the PstI site disappears.
+
+    Leu top is CTG (0.50); alternatives include TTG/TTA (0.13 each).
+    Gln top is CAG (0.65); the only alternative is CAA (0.35).
+    Either swap dissolves the PstI site; the optimiser should pick the
+    least-frequency-loss option (Q → CAA, since 0.35 > 0.13).
+    """
+    table = _load_codon_table("ecoli_k12")
+    dna, conflicts = _optimise_frequency_max("LQ", table, avoid_sites=["CTGCAG"])
+    assert "CTGCAG" not in dna, f"PstI site survived in {dna!r}"
+    assert dna.startswith("CTGCAA"), (
+        f"Expected CTGCAA prefix (Q→CAA preserves L's top codon), got {dna!r}"
+    )
+    assert conflicts == []
+
+
+def test_optimise_frequency_max_reports_unavoidable_conflict() -> None:
+    """When NO synonymous codon can avoid a forbidden site (e.g. site is
+    intrinsic to the encoded amino acid), the optimiser must keep the
+    top-frequency codon AND surface the conflict so the caller sees the
+    constraint failed honestly rather than silently shipping a bad
+    sequence.
+
+    'M' → ATG. If we forbid 'ATG' itself, there's nowhere to go (Met has
+    only one codon).
+    """
+    table = _load_codon_table("ecoli_k12")
+    dna, conflicts = _optimise_frequency_max("M", table, avoid_sites=["ATG"])
+    assert dna.startswith("ATG"), "Met has only one codon — must remain ATG"
+    assert any(c["site"] == "ATG" and c["position"] == 0 for c in conflicts), (
+        f"Expected ATG conflict at position 0, got {conflicts!r}"
+    )

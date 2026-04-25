@@ -56,3 +56,77 @@ def _load_codon_table(organism: str) -> dict[str, dict[str, float]]:
     raise ValueError(
         f"Unknown target_organism {organism!r}; supported: {sorted(SUPPORTED_ORGANISMS)}"
     )
+
+
+def _optimise_frequency_max(
+    protein: str,
+    table: dict[str, dict[str, float]],
+    *,
+    avoid_sites: list[str],
+) -> tuple[str, list[dict[str, int | str]]]:
+    """Greedy frequency-max codon optimisation with restriction-site avoidance.
+
+    Returns ``(dna_sequence, restriction_conflicts)``. The DNA sequence
+    includes the highest-frequency stop codon at the end so the result is
+    translation-ready. ``restriction_conflicts`` is a list of
+    ``{"site": ..., "position": ...}`` entries — empty when avoidance
+    succeeded for every forbidden site.
+
+    Algorithm: for each residue, walk codons in descending frequency
+    order; pick the first one that, when appended, introduces no
+    forbidden site spanning the join (we only need to look at the tail
+    of the sequence — any new site involves at least one base from the
+    new codon). If every synonymous codon introduces a site, fall back
+    to the highest-frequency codon and let the final-pass scan record
+    the unavoidable conflict.
+    """
+    sites = [s.upper() for s in (avoid_sites or [])]
+    max_site_len = max((len(s) for s in sites), default=0)
+    pieces: list[str] = []
+    cursor = 0  # index in the growing DNA sequence
+    aas_with_stop = list(protein) + ["*"]
+
+    for aa in aas_with_stop:
+        if aa not in table:
+            raise ValueError(
+                f"Unrecognised amino-acid {aa!r} at position {len(pieces)} — "
+                f"valid one-letter codes for this organism: {sorted(k for k in table if k != '*')}"
+            )
+        ranked = sorted(
+            table[aa].items(),
+            key=lambda kv: (-kv[1], kv[0]),  # freq desc, codon asc for tie-break
+        )
+        chosen = ranked[0][0]  # default fallback
+        if sites:
+            # We only need the tail to detect a site spanning the join.
+            tail_start = max(0, cursor - (max_site_len - 1))
+            tail = "".join(pieces)[tail_start:]
+            for codon, _freq in ranked:
+                window = tail + codon
+                if not any(site in window for site in sites):
+                    chosen = codon
+                    break
+        pieces.append(chosen)
+        cursor += 3
+
+    dna = "".join(pieces)
+    conflicts = _scan_conflicts(dna, sites)
+    return dna, conflicts
+
+
+def _scan_conflicts(dna: str, sites: list[str]) -> list[dict[str, int | str]]:
+    """Final-pass scan: every occurrence of any forbidden site, sorted by
+    position. Multiple distinct sites at the same position are reported
+    independently; multiple occurrences of the same site each get their
+    own entry."""
+    found: list[dict[str, int | str]] = []
+    for site in sites:
+        start = 0
+        while True:
+            idx = dna.find(site, start)
+            if idx < 0:
+                break
+            found.append({"site": site, "position": idx})
+            start = idx + 1
+    found.sort(key=lambda entry: (entry["position"], entry["site"]))
+    return found
