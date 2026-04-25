@@ -17,11 +17,16 @@ external state at runtime. Codon usage tables come from two static sources:
 
 from __future__ import annotations
 
+import math
 from functools import lru_cache
 from pathlib import Path
+from typing import Any, Literal
 
 import python_codon_tables as pct
+from pydantic import BaseModel, Field, ValidationError
 from python_codon_tables.python_codon_tables import table_with_U_replaced_by_T
+
+from bioinformatics_mcp.utils.errors import error_response
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "codon_tables"
 
@@ -112,6 +117,152 @@ def _optimise_frequency_max(
     dna = "".join(pieces)
     conflicts = _scan_conflicts(dna, sites)
     return dna, conflicts
+
+
+RARE_CODON_THRESHOLD = 0.1
+"""Per-amino-acid relative-frequency cutoff below which a codon is 'rare'.
+0.1 is the conventional threshold used by most online codon optimisers.
+Stops are excluded from the count regardless of their frequency."""
+
+
+def _build_codon_to_aa(table: dict[str, dict[str, float]]) -> dict[str, str]:
+    return {codon: aa for aa, codons in table.items() for codon in codons}
+
+
+def _compute_cai(dna: str, table: dict[str, dict[str, float]]) -> float:
+    """Sharp & Li 1987 CAI: geometric mean of relative adaptiveness
+    ``w_i = f_i / f_max(aa_i)`` over all *non-stop* codons in ``dna``.
+
+    Met / Trp (single-codon AAs) contribute ``log(1) = 0`` to the
+    geometric mean — i.e. they neither raise nor lower the CAI but DO
+    count toward the denominator. Codons with ``f_i = 0`` are excluded
+    from the calculation (Sharp's original convention).
+    """
+    codon_to_aa = _build_codon_to_aa(table)
+    max_freqs = {aa: max(codons.values()) for aa, codons in table.items()}
+    log_w_sum = 0.0
+    n = 0
+    for i in range(0, len(dna) - 2, 3):
+        codon = dna[i : i + 3]
+        aa = codon_to_aa.get(codon)
+        if aa is None or aa == "*":
+            continue
+        f_i = table[aa][codon]
+        f_max = max_freqs[aa]
+        if f_i == 0 or f_max == 0:
+            continue
+        log_w_sum += math.log(f_i / f_max)
+        n += 1
+    if n == 0:
+        return 0.0
+    return math.exp(log_w_sum / n)
+
+
+def _compute_gc_pct(dna: str) -> float:
+    """G+C base count as a percentage of total length. Empty input → 0.0."""
+    if not dna:
+        return 0.0
+    gc = sum(1 for ch in dna if ch in "GCgc")
+    return 100.0 * gc / len(dna)
+
+
+def _compute_rare_codon_count(
+    dna: str,
+    table: dict[str, dict[str, float]],
+    *,
+    threshold: float = RARE_CODON_THRESHOLD,
+) -> int:
+    """Count codons whose per-amino-acid relative frequency is below
+    ``threshold``. Stops excluded; partial trailing codon excluded."""
+    codon_to_aa = _build_codon_to_aa(table)
+    rare = 0
+    for i in range(0, len(dna) - 2, 3):
+        codon = dna[i : i + 3]
+        aa = codon_to_aa.get(codon)
+        if aa is None or aa == "*":
+            continue
+        if table[aa][codon] < threshold:
+            rare += 1
+    return rare
+
+
+class CodonOptimiseInput(BaseModel):
+    """Spec §4.19 input schema. Standard 20 one-letter amino-acid codes
+    only — ambiguity codes (B, J, O, U, X, Z) are rejected because the
+    codon usage tables only carry the canonical 20."""
+
+    protein_sequence: str = Field(
+        ...,
+        min_length=5,
+        max_length=10000,
+        pattern=r"^[ACDEFGHIKLMNPQRSTVWY]+$",
+        description="Target protein sequence (one-letter codes, uppercase, no stops)",
+    )
+    target_organism: Literal[
+        "ecoli_k12", "h_sapiens", "s_cerevisiae", "p_pastoris", "cho", "sf9"
+    ]
+    avoid_restriction_sites: list[str] = Field(default_factory=list)
+
+
+async def bio_codon_optimise(
+    protein_sequence: str,
+    target_organism: str,
+    avoid_restriction_sites: list[str] | None = None,
+) -> dict[str, Any]:
+    """Codon-optimise a protein for one of six expression hosts.
+
+    Returns the spec §4.19 output: optimised DNA (with stop codon
+    appended), CAI, GC%, rare-codon count, and any restriction-site
+    conflicts that survived the synonymous-swap pass.
+    """
+    try:
+        params = CodonOptimiseInput.model_validate(
+            {
+                "protein_sequence": protein_sequence.upper(),
+                "target_organism": target_organism,
+                "avoid_restriction_sites": [s.upper() for s in (avoid_restriction_sites or [])],
+            }
+        )
+    except ValidationError as exc:
+        return error_response(
+            f"Invalid input to bio_codon_optimise: {exc.errors()[0]['msg']}",
+            suggestions=[
+                "Use only the standard 20 one-letter amino-acid codes "
+                "(ACDEFGHIKLMNPQRSTVWY); ambiguity codes like B/J/O/U/X/Z "
+                "are not supported because the codon usage tables don't carry them.",
+                f"Allowed organisms: {sorted(SUPPORTED_ORGANISMS)}.",
+            ],
+        )
+
+    for site in params.avoid_restriction_sites:
+        if not site or any(ch not in "ACGT" for ch in site):
+            return error_response(
+                f"avoid_restriction_sites entry {site!r} is not a DNA sequence.",
+                suggestions=[
+                    "Each entry must be a non-empty DNA string over {A,C,G,T} — "
+                    "e.g. 'GAATTC' for EcoRI, 'AAGCTT' for HindIII.",
+                ],
+            )
+
+    table = _load_codon_table(params.target_organism)
+    dna, conflicts = _optimise_frequency_max(
+        params.protein_sequence,
+        table,
+        avoid_sites=params.avoid_restriction_sites,
+    )
+    return {
+        "optimised_sequence": dna,
+        "target_organism": params.target_organism,
+        "protein_length": len(params.protein_sequence),
+        "length_nt": len(dna),
+        "codon_adaptation_index": round(_compute_cai(dna, table), 4),
+        "gc_content_pct": round(_compute_gc_pct(dna), 2),
+        "rare_codon_count": _compute_rare_codon_count(dna, table),
+        "rare_codon_threshold": RARE_CODON_THRESHOLD,
+        "restriction_conflicts": conflicts,
+        "avoided_sites_count": len(params.avoid_restriction_sites),
+        "stop_codon_appended": True,
+    }
 
 
 def _scan_conflicts(dna: str, sites: list[str]) -> list[dict[str, int | str]]:

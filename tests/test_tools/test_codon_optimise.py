@@ -12,8 +12,12 @@ import pytest
 
 from bioinformatics_mcp.tools.codon_optimise import (
     SUPPORTED_ORGANISMS,
+    _compute_cai,
+    _compute_gc_pct,
+    _compute_rare_codon_count,
     _load_codon_table,
     _optimise_frequency_max,
+    bio_codon_optimise,
 )
 
 
@@ -138,3 +142,111 @@ def test_optimise_frequency_max_reports_unavoidable_conflict() -> None:
     assert any(c["site"] == "ATG" and c["position"] == 0 for c in conflicts), (
         f"Expected ATG conflict at position 0, got {conflicts!r}"
     )
+
+
+# ---- metrics ------------------------------------------------------------
+
+
+def test_cai_of_all_top_codons_is_one() -> None:
+    """A sequence built entirely from each amino acid's top-frequency codon
+    has CAI = 1 by definition (Sharp & Li 1987 — geometric mean of
+    relative adaptiveness w_i = f_i / f_max). Stop codons are excluded
+    from the calculation per the standard convention.
+    """
+    table = _load_codon_table("ecoli_k12")
+    dna, _ = _optimise_frequency_max("MASTER", table, avoid_sites=[])
+    cai = _compute_cai(dna, table)
+    assert cai == pytest.approx(1.0, abs=1e-9), f"All-top sequence should have CAI=1, got {cai}"
+
+
+def test_cai_of_all_rare_codons_is_low() -> None:
+    """Force-build a sequence using a rare Leu codon (CTA, freq 0.04 in
+    E. coli — w = 0.04 / 0.50 = 0.08) and verify CAI reflects this. A
+    pure-CTA sequence should have CAI ~ 0.08.
+    """
+    table = _load_codon_table("ecoli_k12")
+    dna = "CTA" * 5  # five Leu codons, no stop appended
+    cai = _compute_cai(dna, table)
+    expected = 0.04 / 0.50
+    assert cai == pytest.approx(expected, abs=1e-3), (
+        f"Pure-CTA Leu sequence should give CAI ~{expected:.3f}, got {cai}"
+    )
+
+
+def test_gc_pct_simple_cases() -> None:
+    """GC% is base-fraction × 100. Three hand-checked cases."""
+    assert _compute_gc_pct("ATG") == pytest.approx(33.333, abs=0.01)
+    assert _compute_gc_pct("GCGC") == 100.0
+    assert _compute_gc_pct("ATAT") == 0.0
+    assert _compute_gc_pct("") == 0.0
+
+
+def test_rare_codon_count_uses_per_aa_relative_frequency() -> None:
+    """A 'rare' codon is one whose per-amino-acid relative frequency falls
+    below 0.1 (the conventional threshold). Stop codons are excluded.
+
+    All-CTG (top Leu, freq 0.50) → 0 rare codons.
+    All-CTA (rare Leu, freq 0.04) → 5 rare codons in a 15 nt sequence.
+    """
+    table = _load_codon_table("ecoli_k12")
+    assert _compute_rare_codon_count("CTG" * 5, table) == 0
+    assert _compute_rare_codon_count("CTA" * 5, table) == 5
+
+
+# ---- tool entry point ---------------------------------------------------
+
+
+# Insulin B chain (UniProt P01308 residues 25-54) — 30 aa, the prompt's
+# nominated smoke-test substrate for E. coli expression.
+INSULIN_B_CHAIN = "FVNQHLCGSHLVEALYLVCGERGFFYTPKT"
+
+
+async def test_bio_codon_optimise_returns_spec_fields_for_insulin_b_chain() -> None:
+    """End-to-end through the tool boundary: insulin B chain optimised for
+    E. coli must return a dict carrying every spec §4.19 output field
+    with sensible values (CAI in [0, 1], non-negative GC%, sequence length
+    = (protein length + 1 stop) × 3).
+    """
+    out = await bio_codon_optimise(
+        protein_sequence=INSULIN_B_CHAIN,
+        target_organism="ecoli_k12",
+        avoid_restriction_sites=[],
+    )
+    required_keys = {
+        "optimised_sequence",
+        "target_organism",
+        "protein_length",
+        "length_nt",
+        "codon_adaptation_index",
+        "gc_content_pct",
+        "rare_codon_count",
+        "restriction_conflicts",
+    }
+    assert required_keys.issubset(out.keys()), (
+        f"Missing keys: {required_keys - out.keys()}"
+    )
+    assert out["protein_length"] == 30
+    assert out["length_nt"] == 31 * 3, "30 residues + 1 stop = 93 nt"
+    assert len(out["optimised_sequence"]) == 93
+    # All-top-codon optimisation should produce CAI very close to 1
+    # (Sharp & Li exact == 1 only when every chosen codon == max-freq for
+    # its AA; insulin B has no avoid_sites so there's no forced swap).
+    assert out["codon_adaptation_index"] == pytest.approx(1.0, abs=1e-6)
+    assert 0.0 <= out["gc_content_pct"] <= 100.0
+    assert out["rare_codon_count"] == 0
+    assert out["restriction_conflicts"] == []
+    assert out["target_organism"] == "ecoli_k12"
+
+
+async def test_bio_codon_optimise_rejects_invalid_amino_acid_at_schema_layer() -> None:
+    """The Pydantic regex on protein_sequence must reject non-standard one-
+    letter codes (here: 'B' which is the Asn/Asp ambiguity code) before
+    the optimiser sees the input. The tool catches the validation error
+    and returns the project-standard error_response shape."""
+    out = await bio_codon_optimise(
+        protein_sequence="MABCDEFG",
+        target_organism="ecoli_k12",
+        avoid_restriction_sites=[],
+    )
+    assert isinstance(out, dict)
+    assert "error" in out, f"Expected error_response shape, got {out!r}"
