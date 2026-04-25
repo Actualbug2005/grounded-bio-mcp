@@ -1,14 +1,17 @@
-"""Unit tests for ``bio_design_grna`` (spec §4.7).
+"""Unit + integration tests for ``bio_design_grna`` (spec §4.7).
 
-CRISPOR is invoked via subprocess at runtime; tests stub the ``CrisporRunner``
-to return hand-crafted TSV fixtures so the wrapper's parse + transform logic
-is fully exercised without touching the bundled CRISPOR install. The
-``CRISPOR_LIVE=1`` integration test (see ``test_design_grna_live.py`` once it
-lands) exercises the live subprocess path against the bundled sacCer3
-genome — but only on machines where Rosetta or native arm64 binaries make
-the bundled x86_64 binaries runnable. On Apple Silicon dev machines
-without Rosetta the live path is skipped; the LXC in Session 8b is the
-canonical live-exec environment.
+CRISPOR is invoked via subprocess at runtime; the offline tests in this
+file stub the ``CrisporRunner`` to return hand-crafted TSV fixtures so
+the wrapper's parse + transform logic is fully exercised without
+touching the bundled CRISPOR install.
+
+The single live test at the bottom is **double-gated** —
+``RUN_INTEGRATION=1`` (project-wide opt-in for live tests) AND
+``CRISPOR_LIVE=1`` (CRISPOR-specific gate, on top of the integration
+gate, because the bundled CRISPOR distribution ships x86_64 binaries
+that need Rosetta on Apple Silicon dev machines and don't run at all
+without it). On the dev machine the live path stays skipped; on the
+Session 8b LXC the live path runs and joins the smoke harness.
 
 Fixtures under ``tests/fixtures/crispor_*.tsv`` are hand-crafted
 derivatives of CRISPOR's output format (see ``docs/crispor_output_format.md``)
@@ -19,6 +22,7 @@ this project is Apache-2.0 from Session 8.5 onward).
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -28,6 +32,7 @@ from bioinformatics_mcp.clients.crispor import (
     CrisporRunner,
     GenomeIndexNotFound,
 )
+from bioinformatics_mcp.config import get_settings
 from bioinformatics_mcp.tools.design_grna import bio_design_grna
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
@@ -785,3 +790,151 @@ async def test_bio_design_grna_provenance_carries_genome_and_versions() -> None:
     assert "tool_version" in prov
     assert prov["fetched_at"].endswith("+00:00") or "T" in prov["fetched_at"]
     assert "crispor" in prov["url"].lower()
+
+
+# ---- live integration ---------------------------------------------------
+
+# Synthetic 500 nt target — random-ish sequence with multiple NGG triplets so
+# CRISPOR has somewhere to find candidate guides. The biological meaning is
+# unimportant; the integration test asserts on structure (the wrapper round-
+# trips real CRISPOR output) rather than on which yeast gene gets hit.
+_LIVE_TARGET_SEQUENCE = (
+    "ATGCAAGCTAGCTACGTACGTACGGAATCGATCGATCGTACGTAGGTACGTACGTACTAGG"
+    "CCCATGCAAGCTAGCTACGTACGTACAGGAATCGATCGATCGTACGTAGGTACGTACGTAC"
+    "TAGGCCCATGCAAGCTAGCTACGTACGTACAGGAATCGATCGATCGTACGTAGGTACGTAC"
+    "GTACTAGGCCCATGCAAGCTAGCTACGTACGTACAGGAATCGATCGATCGTACGTAGGTAC"
+    "GTACGTACTAGGCCCATGCAAGCTAGCTACGTACGTACAGGAATCGATCGATCGTACGTAG"
+    "GTACGTACGTACTAGGCCCATGCAAGCTAGCTACGTACGTACAGGAATCGATCGATCGTAC"
+    "GTAGGTACGTACGTACTAGGCCCATGCAAG"
+)
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    os.environ.get("CRISPOR_LIVE") != "1",
+    reason=(
+        "CRISPOR live exec gated on CRISPOR_LIVE=1 — bundled CRISPOR ships "
+        "x86_64 binaries; Apple Silicon dev needs Rosetta or native arm64 "
+        "binaries to run them. Set CRISPOR_LIVE=1 on the LXC (or any host "
+        "where the bundled binaries can run) to enable."
+    ),
+)
+async def test_bio_design_grna_live_against_sacCer3() -> None:
+    """Live CRISPOR end-to-end through the wrapper against the bundled
+    sacCer3 genome.
+
+    Asserts on **structure** rather than biology — the synthetic target
+    isn't a meaningful yeast locus, so we don't claim particular gene
+    hits, but we do assert that:
+
+      - the subprocess returned non-empty TSVs
+      - candidate guides were found
+      - the spec §4.7 output shape is intact (every required key present
+        on the response and on each guide entry)
+      - provenance carries the live ViennaRNA / CRISPOR coordinates
+      - off-target classification produced at least one of CDS / intron /
+        intergenic / unknown
+
+    The LXC in Session 8b runs this as part of the deployment acceptance
+    test before the evaluation harness Q10 fires. Failure here means
+    the wrapper has drifted from CRISPOR's output format — investigate
+    rather than skip.
+    """
+    settings = get_settings()
+    crispor_path = settings.crispor_path
+    crispor_python = settings.crispor_python
+    genomes_dir = settings.genome_dir
+
+    if not crispor_path.is_dir():
+        pytest.skip(
+            f"CRISPOR_PATH={crispor_path} does not exist — set CRISPOR_PATH "
+            "to a working CRISPOR install (e.g. ~/opt/crispor on dev)."
+        )
+    if not crispor_python.exists():
+        pytest.skip(
+            f"CRISPOR_PYTHON={crispor_python} does not exist — set "
+            "CRISPOR_PYTHON to the venv python executable."
+        )
+    if not (genomes_dir / "sacCer3").is_dir():
+        pytest.skip(
+            f"sacCer3 not found under GENOME_DIR={genomes_dir} — populate "
+            "from CRISPOR's genomes.sample/sacCer3/ before running."
+        )
+
+    runner = CrisporRunner(
+        crispor_python=crispor_python,
+        crispor_path=crispor_path,
+        genomes_dir=genomes_dir,
+        timeout_s=300.0,
+    )
+    out = await bio_design_grna(
+        target_sequence=_LIVE_TARGET_SEQUENCE,
+        genome="sacCer3",
+        pam="NGG",
+        max_guides=10,
+        runner=runner,
+    )
+
+    # Sanity: the run did not error.
+    assert out.get("error") is not True, (
+        f"live run errored: {out.get('message')!r}"
+    )
+
+    # Structural shape — every spec-required top-level key.
+    for key in (
+        "guides",
+        "candidate_guides_count",
+        "returned_guides_count",
+        "genome",
+        "pam",
+        "provenance",
+        "confidence",
+    ):
+        assert key in out, f"top-level key {key!r} missing from live output"
+
+    assert out["genome"] == "sacCer3"
+    assert out["pam"] == "NGG"
+    assert out["candidate_guides_count"] >= 1, (
+        "expected at least one candidate guide in 500 nt target with "
+        "multiple NGG sites"
+    )
+
+    # Per-guide shape on the top guide.
+    top = out["guides"][0]
+    for key in (
+        "guide_id",
+        "sequence",
+        "pam",
+        "position",
+        "strand",
+        "specificity_score",
+        "cfd_specificity",
+        "efficiency_scores",
+        "off_targets",
+        "off_target_summary",
+    ):
+        assert key in top, f"per-guide key {key!r} missing on top guide"
+
+    assert len(top["sequence"]) == 20, (
+        f"spacer should be 20 nt; got {len(top['sequence'])}"
+    )
+    assert len(top["pam"]) == 3, (
+        f"PAM should be 3 nt for NGG; got {len(top['pam'])}"
+    )
+    assert top["strand"] in ("+", "-")
+
+    # locus classification reaches the spec surface.
+    classes_seen = {
+        ot["locus_class"]
+        for guide in out["guides"]
+        for ot in guide["off_targets"]
+    }
+    assert classes_seen, "no off-target locus classifications produced"
+    assert classes_seen.issubset({"CDS", "intron", "intergenic", "unknown"})
+
+    # Provenance carries the live coordinates.
+    prov = out["provenance"]
+    assert prov["source"] == "CRISPOR"
+    assert prov["genome"] == "sacCer3"
+    assert "tool_version" in prov
+    assert "fetched_at" in prov
