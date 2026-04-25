@@ -5,10 +5,13 @@ fetches from primary databases — NCBI, UniProt, EBI, Ensembl, AlphaFold DB,
 RCSB PDB, ChEMBL, PubChem, Europe PMC, Reactome, STRING — instead of letting a
 model pattern-match from training data.
 
-**Status:** 18 of 19 tools live and registered. The remaining tool
-(`bio_design_grna`, CRISPOR-backed gRNA design with off-target analysis)
-lands later in Session 8a; LXC deployment + evaluation harness follow in
-Session 8b. See [`bioinformatics-mcp-spec.md`](./bioinformatics-mcp-spec.md)
+**Status:** All 19 v2-spec tools live and registered as of Session 8a.
+LXC deployment with full genome indexes (felCat9 / hg38 / mm39) and
+the spec §10.4 evaluation harness follow in Session 8b. CRISPOR's
+live-exec smoke is gated on `CRISPOR_LIVE=1` because the bundled
+CRISPOR distribution ships x86_64 binaries; Apple Silicon dev runs
+without Rosetta keep the live path skipped, the LXC exercises it.
+See [`bioinformatics-mcp-spec.md`](./bioinformatics-mcp-spec.md)
 for the full specification and [`project-handoff.md`](./project-handoff.md)
 for the per-session brief.
 
