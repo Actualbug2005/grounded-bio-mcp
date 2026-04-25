@@ -111,33 +111,51 @@ chown -R grounded-bio-mcp:grounded-bio-mcp /opt/crispor
 
 ### E. Genome index downloads — **THREE DOWNLOAD GATES**
 
-Surface for user approval **one at a time**, in size order:
+Surface for user approval **one at a time**, in size order. URLs + compressed sizes verified live during Session 8a (2026-04-25); the legacy `crispor.tefor.net/genomes/*.tar.gz` bundles are dead, so the script (`scripts/fetch_genome.sh`) fetches UCSC's goldenPath FASTA and runs `bwa index` + `faToTwoBit` + `twoBitInfo` locally rather than expecting a pre-built bundle.
+
+The pre-flight pass (script run without `CONFIRM_DOWNLOAD=1`) prints URL + Content-Length + target path; the gated pass (`CONFIRM_DOWNLOAD=1`) actually fetches.
 
 #### E.1 felCat9 (smallest, sanity check)
 
-- Source: same URL as Session 8a (verify still valid)
-- Size: ~1 GB
+- Source: `https://hgdownload.soe.ucsc.edu/goldenPath/felCat9/bigZips/felCat9.fa.gz`
+- Compressed: **812 014 328 bytes (774.4 MiB)** — verified via HEAD request 2026-04-25
 - Target: `/var/lib/grounded_bio_mcp/genomes/felCat9/`
+- Estimated wall time: ~25 min (download + decompress + BWA-index)
 
-Wait for user approval. Fetch + verify checksum + extract. Record provenance JSON in target dir.
+Wait for user approval. Then `CONFIRM_DOWNLOAD=1 scripts/fetch_genome.sh felCat9`. Record provenance JSON in target dir if upstream publishes a checksum (UCSC does not at the bigZips path; capture SHA256 of the downloaded archive instead).
 
 #### E.2 hg38 (largest)
 
-- Source: `http://crispor.tefor.net/genomes/hg38.tar.gz` (verify URL)
-- Size: ~3.2 GB
+- Source: `https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz`
+- Compressed: **983 659 424 bytes (938.1 MiB)** — verified 2026-04-25
 - Target: `/var/lib/grounded_bio_mcp/genomes/hg38/`
+- Estimated wall time: ~35 min
 
-Wait for user approval. Fetch + verify + extract. Provenance.
+Wait for user approval. `CONFIRM_DOWNLOAD=1 scripts/fetch_genome.sh hg38`. Provenance.
 
 #### E.3 mm39
 
-- Source: `http://crispor.tefor.net/genomes/mm39.tar.gz` (verify URL)
-- Size: ~2.8 GB
+- Source: `https://hgdownload.soe.ucsc.edu/goldenPath/mm39/bigZips/mm39.fa.gz`
+- Compressed: **870 543 764 bytes (830.2 MiB)** — verified 2026-04-25
 - Target: `/var/lib/grounded_bio_mcp/genomes/mm39/`
+- Estimated wall time: ~30 min
 
-Wait for user approval. Fetch + verify + extract. Provenance.
+Wait for user approval. `CONFIRM_DOWNLOAD=1 scripts/fetch_genome.sh mm39`. Provenance.
 
-**Total disk used post-extraction:** ~20 GB across three genomes.
+**Total compressed:** 2.5 GiB across three genomes (smaller than the original prompt's 7 GB estimate — those numbers were for the deprecated `tefor.net` pre-built bundles which included BWA indexes; UCSC's FASTA-only files are smaller because indexing happens locally).
+**Total disk after extraction + BWA-index:** ~20 GB. Fits in the 80 GB data mount.
+
+#### E.4 segments.bed (locus_class classification — open question)
+
+`scripts/fetch_genome.sh` does **not** produce `<genome>.segments.bed`. Without it, `bio_design_grna`'s `locus_class` field falls back to `"unknown"` for all off-targets in hg38/mm39/felCat9 — losing the CDS/intron/intergenic surface §4.7 promises. (sacCer3 ships its own segments.bed bundled with CRISPOR, so the yeast smoke is unaffected.)
+
+Three forward paths (decide during 8b pre-work):
+
+1. **Patch and run CRISPOR's deprecated `crisprAddGenome.old`** — Python 2-era webserver helper at `/opt/crispor/tools/usrLocalBin/crisprAddGenome.old`. Hardcoded paths to `/var/www/crispor/...` need surgery. Fragile but produces an authoritative segments.bed.
+2. **Build segments.bed manually from a GFF** — `awk` / `bedtools` over RefSeq GFF using CRISPOR's segment-prefix conventions (`ig:G1|G2`, `ex:GENE`, `in:GENE`). Most work but most maintainable.
+3. **Accept `locus_class="unknown"` for hg38 / mm39** — defer segments.bed to a follow-up session. Q10 evaluation harness still works structurally but the off-target classification surface is degraded.
+
+Strong recommendation: option 2. Worth one focused session post-8b before declaring deployment "done"; option 3 leaves an honest gap in the spec output.
 
 **Commit (after all three are verified working with CRISPOR):** `chore(deploy): genome indexes on pve2 LXC — felCat9 + hg38 + mm39 with provenance`
 
