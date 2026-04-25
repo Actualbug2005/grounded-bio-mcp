@@ -1,0 +1,4 @@
+#seqId	guideId	targetSeq	mitSpecScore	offtargetCount	targetGenomeGeneLocus	Doench '16-Score	Doench '16-Old-Score	Chari-Score	Xu-Score	Doench '14-Score	Wang-Score	Moreno-Mateos-Score	Azimuth in-vitro-Score	Out-of-Frame-Score
+testTarget	150forw	GCAGGCATGTACGTACGTACAGG	95	2	exon:CAN1	68	65	72	0.521	44	78	58	61	62
+testTarget	250forw	TGCATCAGTAATGCATCAGTAGG	65	4	intergenic:CAN1-OAC1	53	48	60	0.302	35	66	49	52	58
+testTarget	350rev	AAAGCTAGCTAGCTAGCTAGCGG	35	2	intron:OAC1	41	38	45	0.198	28	54	38	42	51

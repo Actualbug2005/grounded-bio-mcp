@@ -1,0 +1,9 @@
+seqId	guideId	guideSeq	offtargetSeq	mismatchPos	mismatchCount	mitOfftargetScore	cfdOfftargetScore	chrom	start	end	strand	locusDesc
+testTarget	150forw	GCAGGCATGTACGTACGTACAGG	GCAGGCATGTACGTACGTACAGG	....................	0	1.0	1.0	chrV	100150	100173	+	exon:CAN1
+testTarget	150forw	GCAGGCATGTACGTACGTACAGG	GCAGGCAaGgACGTACGTACAGG	.......*.*..........	2	0.085	0.32	chrIII	5840000	5840023	-	intron:NUP100
+testTarget	250forw	TGCATCAGTAATGCATCAGTAGG	TGCATCAGTAATGCATCAGTAGG	....................	0	1.0	1.0	chrV	100250	100273	+	intergenic:CAN1-OAC1
+testTarget	250forw	TGCATCAGTAATGCATCAGTAGG	TGCATtAGTAATGCATCAGTAGG	.....*..............	1	0.5	0.65	chrIV	2300000	2300023	+	exon:GAL1
+testTarget	250forw	TGCATCAGTAATGCATCAGTAGG	TGgATCAGTAATGCATCcGTAGG	..*..............*..	2	0.18	0.28	chrII	900000	900023	-	intergenic:HXT1-HXT2
+testTarget	250forw	TGCATCAGTAATGCATCAGTAGG	TtCATCAGTAATGgATCAGTAGG	.*..............*...	2	0.12	0.21	chrXII	450000	450023	+	intron:RPL10
+testTarget	350rev	AAAGCTAGCTAGCTAGCTAGCGG	AAAGCTAGCTAGCTAGCTAGCGG	....................	0	1.0	1.0	chrV	100350	100373	-	intron:OAC1
+testTarget	350rev	AAAGCTAGCTAGCTAGCTAGCGG	gAAGCTAGCTAGCTAGCTAGCGG	*...................	1	0.7	0.78	chrXVI	600000	600023	+	intergenic:THI13-THI11
