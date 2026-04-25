@@ -8,7 +8,7 @@ A Model Context Protocol server that grounds Claude's biology answers in primary
 
 ## Current state — end of session 7
 
-Seventeen of eighteen spec tools live and registered, plus one tool implemented-but-not-registered that needs catching up. Two hundred and five offline tests passing, sixteen integration tests passing under live API conditions, seventeen smoke tests passing end-to-end against real services. Zero regressions across all sessions. Memory system has roughly thirty-seven entries with no orphans or drift detected at last audit (session 4).
+Seventeen of nineteen tool files in `src/bioinformatics_mcp/tools/` are fully implemented, registered, smoke-tested, and unit-tested; the remaining two (`fold_sequence.py`, `design_grna.py`) are 14-line TODO stubs that land as Session 8a deliverables. Two hundred and five offline tests passing, sixteen integration tests passing under live API conditions, seventeen smoke tests passing end-to-end against real services. Zero regressions across all sessions. Memory system has roughly thirty-seven entries with no orphans or drift detected at last audit (session 4). The Session 8a opening audit (`docs/audit_session_8a.md`) corrects an earlier inaccurate classification of `bio_fold_sequence` as "implemented but not registered".
 
 ### Tools by status
 
@@ -32,13 +32,10 @@ Live and registered (17):
 - bio_codon_optimise (local + bundled Kazusa data)
 - bio_blast_search (NCBI BLAST URL API)
 
-Implemented but not registered (1):
+Stub only — implementation in Session 8a (2):
 
-- bio_fold_sequence (ViennaRNA, spec §4.8) — discovered during session 7 final audit. Implementation exists; needs server registration plus smoke test inclusion.
-
-Not yet implemented (1):
-
-- bio_design_grna (CRISPOR, spec §4.7) — heaviest tool in the spec, requires local CRISPOR install plus multi-gigabyte genome indexes, deferred to session 8.
+- bio_fold_sequence (ViennaRNA, spec §4.8) — 14-line stub with TODO comment in module docstring; no callable function. Originally reported as "implemented but not registered" at the end of session 7; the Session 8a opening audit (`docs/audit_session_8a.md`) confirmed the file is a stub, not an implementation. Implementation lands in 8a using the Python bindings (`import RNA`) restricted to non-GLPK API surface.
+- bio_design_grna (CRISPOR, spec §4.7) — 14-line stub with TODO comment. Heaviest tool in the spec; requires local CRISPOR install plus multi-gigabyte genome indexes. Implementation arc lands in 8a alongside fold_sequence; only felCat9 indexed on dev machine, with hg38 + mm39 deferred to the LXC in 8b.
 
 ### Infrastructure not yet built
 
