@@ -1,6 +1,6 @@
-# Bioinformatics MCP Server — Project Handoff
+# grounded-bio-mcp — Project Handoff
 
-> Purpose: Self-contained briefing for any new conversation continuing this project. Read this in full before issuing any session prompts. Pair with the canonical spec at `bioinformatics-mcp-spec.md` and the session prompts under `prompts/`.
+> Purpose: Self-contained briefing for any new conversation continuing this project. Read this in full before issuing any session prompts. Pair with the canonical spec at `grounded-bio-mcp-spec.md` and the session prompts under `prompts/`.
 
 ## Project in one paragraph
 
@@ -8,7 +8,7 @@ A Model Context Protocol server that grounds Claude's biology answers in primary
 
 ## Current state — end of session 7
 
-Seventeen of nineteen tool files in `src/bioinformatics_mcp/tools/` are fully implemented, registered, smoke-tested, and unit-tested; the remaining two (`fold_sequence.py`, `design_grna.py`) are 14-line TODO stubs that land as Session 8a deliverables. Two hundred and five offline tests passing, sixteen integration tests passing under live API conditions, seventeen smoke tests passing end-to-end against real services. Zero regressions across all sessions. Memory system has roughly thirty-seven entries with no orphans or drift detected at last audit (session 4). The Session 8a opening audit (`docs/audit_session_8a.md`) corrects an earlier inaccurate classification of `bio_fold_sequence` as "implemented but not registered".
+Seventeen of nineteen tool files in `src/grounded_bio_mcp/tools/` are fully implemented, registered, smoke-tested, and unit-tested; the remaining two (`fold_sequence.py`, `design_grna.py`) are 14-line TODO stubs that land as Session 8a deliverables. Two hundred and five offline tests passing, sixteen integration tests passing under live API conditions, seventeen smoke tests passing end-to-end against real services. Zero regressions across all sessions. Memory system has roughly thirty-seven entries with no orphans or drift detected at last audit (session 4). The Session 8a opening audit (`docs/audit_session_8a.md`) corrects an earlier inaccurate classification of `bio_fold_sequence` as "implemented but not registered".
 
 ### Tools by status
 
@@ -122,7 +122,7 @@ Session 7 (codon optimiser and BLAST): bio_codon_optimise with bundled Kazusa co
 
 ## Operational details for session 8
 
-**CRISPOR install requirements.** Clone `https://github.com/maximilianh/crisporWebsite` to `/opt/crispor`. Create separate venv (Python 3.11 if 3.13 incompatible, both available on Trixie). Install requirements. System dependency: `bwa` package via apt. Genome indexes per-species, multi-gigabyte downloads, stored at `/var/lib/bioinformatics_mcp/genomes/`. Initial spec called for hg38, mm39, felCat9 pre-indexed.
+**CRISPOR install requirements.** Clone `https://github.com/maximilianh/crisporWebsite` to `/opt/crispor`. Create separate venv (Python 3.11 if 3.13 incompatible, both available on Trixie). Install requirements. System dependency: `bwa` package via apt. Genome indexes per-species, multi-gigabyte downloads, stored at `/var/lib/grounded_bio_mcp/genomes/`. Initial spec called for hg38, mm39, felCat9 pre-indexed.
 
 **Genome index downloads will hit the download approval gate.** Same pattern as Kazusa codon tables in session 7 — surface URLs and sizes ahead of approval, wait for explicit go-ahead. Each genome is roughly 3 GB so this is a significant network operation deserving explicit user acknowledgement.
 
@@ -130,7 +130,7 @@ Session 7 (codon optimiser and BLAST): bio_codon_optimise with bundled Kazusa co
 
 **Caddy reverse proxy with bearer token auth.** Server binds 127.0.0.1:8080. Caddy fronts at `bio-mcp.devlin.lan` (or equivalent), validates `Authorization: Bearer ${MCP_AUTH_TOKEN}` header, proxies to local server.
 
-**systemd service.** User `bio-mcp`, working directory `/opt/bioinformatics_mcp/app`, environment file `/etc/bioinformatics_mcp/env`. Hardening directives: NoNewPrivileges, ProtectSystem=strict, ProtectHome, PrivateTmp.
+**systemd service.** User `bio-mcp`, working directory `/opt/grounded_bio_mcp/app`, environment file `/etc/grounded_bio_mcp/env`. Hardening directives: NoNewPrivileges, ProtectSystem=strict, ProtectHome, PrivateTmp.
 
 **Connection from claude.ai.** Settings → Connectors → Add custom connector. URL is the Caddy-fronted endpoint plus `/mcp`. Bearer token from `MCP_AUTH_TOKEN`. Transport: streamable HTTP.
 
@@ -182,7 +182,7 @@ EBI_EMAIL=... python scripts/smoke_test_phase1a.py
 Run server in stdio mode for MCP Inspector:
 
 ```bash
-mcp dev src/bioinformatics_mcp/server.py
+mcp dev src/grounded_bio_mcp/server.py
 ```
 
 Or programmatically:
@@ -215,8 +215,8 @@ The download approval gate pattern from session 7 should be the model for genome
 
 ## What this handoff does not contain
 
-- Implementation details of individual tools — read the source code at `src/bioinformatics_mcp/`
-- Spec details — read `bioinformatics-mcp-spec.md`
+- Implementation details of individual tools — read the source code at `src/grounded_bio_mcp/`
+- Spec details — read `grounded-bio-mcp-spec.md`
 - Session-by-session reasoning — read `prompts/session-*.md` files in order
 - API quirks discovered per-tool — read `~/.claude/projects/.../memory/MEMORY.md` and the entries it indexes
 - Test fixtures — read `tests/fixtures/`

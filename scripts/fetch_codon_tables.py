@@ -14,7 +14,7 @@ Run::
     .venv/bin/python scripts/fetch_codon_tables.py
 
 The codon optimiser's loader (``tools/codon_optimise.py``) reads from
-``src/bioinformatics_mcp/data/codon_tables/`` and falls through to
+``src/grounded_bio_mcp/data/codon_tables/`` and falls through to
 ``python_codon_tables.get_codons_table`` for the three ``ecoli_k12`` /
 ``h_sapiens`` / ``s_cerevisiae`` aliases that the library *does* ship.
 
@@ -36,7 +36,7 @@ from typing import Any
 import httpx
 
 HERE = Path(__file__).resolve().parent
-DATA_DIR = HERE.parent / "src" / "bioinformatics_mcp" / "data" / "codon_tables"
+DATA_DIR = HERE.parent / "src" / "grounded_bio_mcp" / "data" / "codon_tables"
 
 KAZUSA_URL = "http://www.kazusa.or.jp/codon/cgi-bin/showcodon.cgi?aa=1&style=N&species={taxid}"
 
@@ -45,7 +45,7 @@ KAZUSA_URL = "http://www.kazusa.or.jp/codon/cgi-bin/showcodon.cgi?aa=1&style=N&s
 CODON_REGEX = re.compile(r"([ATGCU]{3}) ([A-Z]|\*) (\d\.\d+)")
 
 USER_AGENT = (
-    "bioinformatics-mcp/0.2 (codon-table-fetch; "
+    "grounded-bio-mcp/0.2 (codon-table-fetch; "
     "+mailto:zgqr6xbt6f@privaterelay.appleid.com)"
 )
 

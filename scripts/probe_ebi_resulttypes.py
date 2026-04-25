@@ -22,9 +22,9 @@ import asyncio
 import os
 import sys
 
-from bioinformatics_mcp.clients.base import RATE_LIMITS
-from bioinformatics_mcp.clients.ebi import EBIJobRunner
-from bioinformatics_mcp.utils.rate_limit import RateLimitedClient
+from grounded_bio_mcp.clients.base import RATE_LIMITS
+from grounded_bio_mcp.clients.ebi import EBIJobRunner
+from grounded_bio_mcp.utils.rate_limit import RateLimitedClient
 
 # Three tiny insulin orthologue snippets — Clustal aligns them in ~10 s.
 CLUSTAL_PARAMS = {
@@ -54,7 +54,7 @@ async def _probe(service: str, params: dict[str, str], email: str) -> None:
         max_concurrent=rl.max_concurrent,
         min_interval_s=rl.min_interval_s,
         timeout=60.0,
-        headers={"User-Agent": "bioinformatics-mcp/0.2 (+probe)"},
+        headers={"User-Agent": "grounded-bio-mcp/0.2 (+probe)"},
     )
     try:
         runner = EBIJobRunner(service, client)

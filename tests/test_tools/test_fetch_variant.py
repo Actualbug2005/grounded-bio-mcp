@@ -23,12 +23,12 @@ import httpx
 import pytest
 import respx
 
-from bioinformatics_mcp.clients.ensembl import (
+from grounded_bio_mcp.clients.ensembl import (
     ENSEMBL_GRCH37_BASE_URL,
     ENSEMBL_REST_BASE_URL,
     EnsemblClient,
 )
-from bioinformatics_mcp.tools.fetch_variant import bio_fetch_variant
+from grounded_bio_mcp.tools.fetch_variant import bio_fetch_variant
 
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures"
 

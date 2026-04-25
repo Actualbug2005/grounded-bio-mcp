@@ -22,7 +22,7 @@ from itertools import pairwise
 import httpx
 import pytest
 
-from bioinformatics_mcp.utils.rate_limit import RateLimitedClient
+from grounded_bio_mcp.utils.rate_limit import RateLimitedClient
 
 
 @pytest.mark.asyncio

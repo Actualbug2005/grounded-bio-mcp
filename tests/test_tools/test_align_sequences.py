@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from Bio import AlignIO
 
-from bioinformatics_mcp.tools.align_sequences import (
+from grounded_bio_mcp.tools.align_sequences import (
     AlignSequencesInput,
     _build_multifasta,
     _compute_stats,
@@ -164,7 +164,7 @@ async def test_bio_align_sequences_truncates_oversized_alignment(
 ) -> None:
     # Shrink the soft cap so the tiny fixture trips the oversize path.
     monkeypatch.setattr(
-        "bioinformatics_mcp.tools.align_sequences.ALIGNMENT_SOFT_CAP_BYTES", 10
+        "grounded_bio_mcp.tools.align_sequences.ALIGNMENT_SOFT_CAP_BYTES", 10
     )
     fake_runner.run.return_value = TINY_ALN.encode()
     out = await bio_align_sequences(
@@ -187,7 +187,7 @@ async def test_bio_align_sequences_truncates_oversized_alignment(
 async def test_bio_align_sequences_jobfailed_returns_actionable_error(
     fake_runner: MagicMock,
 ) -> None:
-    from bioinformatics_mcp.utils.errors import JobFailed
+    from grounded_bio_mcp.utils.errors import JobFailed
 
     fake_runner.run.side_effect = JobFailed(
         service="clustalo", job_id="J-BAD", status="FAILED"
@@ -210,7 +210,7 @@ async def test_bio_align_sequences_jobfailed_returns_actionable_error(
 async def test_bio_align_sequences_timeout_returns_actionable_error(
     fake_runner: MagicMock,
 ) -> None:
-    from bioinformatics_mcp.utils.errors import JobTimeoutError
+    from grounded_bio_mcp.utils.errors import JobTimeoutError
 
     fake_runner.run.side_effect = JobTimeoutError(
         service="clustalo",
@@ -243,8 +243,8 @@ async def test_bio_align_sequences_timeout_returns_actionable_error(
 )
 async def test_integration_align_three_insulin_orthologues() -> None:
     """Real EBI Clustal run — 3 short insulin orthologue signal peptides."""
-    from bioinformatics_mcp.clients.ebi import EBIJobRunner
-    from bioinformatics_mcp.utils.rate_limit import RateLimitedClient
+    from grounded_bio_mcp.clients.ebi import EBIJobRunner
+    from grounded_bio_mcp.utils.rate_limit import RateLimitedClient
 
     email = os.environ["EBI_EMAIL"]
     rlc = RateLimitedClient(max_concurrent=3, min_interval_s=0.5, timeout=60.0)

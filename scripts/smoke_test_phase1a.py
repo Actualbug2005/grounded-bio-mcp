@@ -49,7 +49,7 @@ from typing import Any
 
 from fastmcp import Client
 
-from bioinformatics_mcp.server import mcp
+from grounded_bio_mcp.server import mcp
 
 
 _SKIP_SENTINEL: object = object()
@@ -189,7 +189,7 @@ def _build_cases() -> list[tuple[str, dict[str, Any] | object, Any]]:
     # make the tool dispatch live while the smoke-test lambda still
     # expected the graceful-error branch. Asking get_settings() keeps
     # both sides in sync.
-    from bioinformatics_mcp.config import get_settings as _get_settings
+    from grounded_bio_mcp.config import get_settings as _get_settings
 
     has_email = bool(_get_settings().ebi_email)
 

@@ -19,7 +19,7 @@ import asyncio
 
 import pytest
 
-from bioinformatics_mcp.tools.fold_sequence import bio_fold_sequence
+from grounded_bio_mcp.tools.fold_sequence import bio_fold_sequence
 
 
 SHORT_HAIRPIN_RNA = "GGGAAAUCCC"

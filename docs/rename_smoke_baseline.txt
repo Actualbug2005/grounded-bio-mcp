@@ -1,0 +1,23 @@
+STRING_USER_EMAIL not set; STRING requests a contact email for courtesy. Set STRING_USER_EMAIL in the server env.
+
+Phase 1+2+3+8a smoke test  —  18 passed, 1 skipped, 0 failed of 19 attempted
+
+  ✓ bio_fetch_sequence        accession=NM_001301717.2 length=2191
+  ✓ bio_fetch_uniprot         length=110 xrefs=['EMBL', 'other', 'RefSeq', 'PDB', 'AlphaFoldDB', 'Ensembl', 'InterPro', 'Pfam', 'SMART']
+  ✓ bio_fetch_pdb             resolution=1.5Å method=X-RAY DIFFRACTION
+  ✓ bio_fetch_alphafold       mean_pLDDT=52.9 residues=110
+  ✓ bio_fetch_variant         rs429358 GRCh38 maf=0.148 (gnomADe:ALL)
+  ✓ bio_predict_variant_effect  APOE missense; transcripts=42 format=hgvs
+  ✓ bio_fetch_gene            BRCA1 chr17 transcripts=736 GO=75
+  ✓ bio_align_sequences       conserved=17 strict=70.83%
+  ✓ bio_scan_domains          matches=3 dbs=['PfamA', 'SMART', 'CDD']
+  ✓ bio_fetch_compound        ASPIRIN sources=['chembl', 'pubchem'] phase=4.0
+  ✓ bio_fetch_bioactivity     total=604 returned=12 null_excluded=0 below_excluded=38
+  ✓ bio_search_literature     Sugisawa 2016 PMC5059666 hits=3
+  ✓ bio_fetch_paper_fulltext  PMC5059666 availability=full_xml sections=29 figures=4
+  ✓ bio_fetch_pathway         R-HSA-109581 Apoptosis lit_refs=7
+  ✓ bio_fetch_interactions    TP53/9606 partners=10 min_score=700
+  ✓ bio_codon_optimise        len=75nt CAI=1.0 GC%=74.67 rare=0
+  ✓ bio_blast_search          hits=5 top E-value=5.69e-16 top accession=P01316
+  ↷ bio_design_grna           CRISPOR live exec gated on CRISPOR_LIVE=1 (set on LXC; skipped on Apple Silicon dev where bundled CRISPOR x86_64 binaries cannot run without Rosetta)
+  ✓ bio_fold_sequence         tRNA-Phe MFE=-22.4 bp=21 viennarna=2.7.2

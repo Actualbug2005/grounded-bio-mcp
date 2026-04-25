@@ -18,12 +18,12 @@ import httpx
 import pytest
 import respx
 
-from bioinformatics_mcp.clients.ensembl import (
+from grounded_bio_mcp.clients.ensembl import (
     ENSEMBL_GRCH37_BASE_URL,
     ENSEMBL_REST_BASE_URL,
     EnsemblClient,
 )
-from bioinformatics_mcp.utils.errors import (
+from grounded_bio_mcp.utils.errors import (
     AccessionNotFound,
     ExternalServiceDown,
     RateLimitExceeded,

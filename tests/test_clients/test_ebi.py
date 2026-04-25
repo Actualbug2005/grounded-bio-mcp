@@ -19,13 +19,13 @@ import httpx
 import pytest
 import respx
 
-from bioinformatics_mcp.clients.ebi import (
+from grounded_bio_mcp.clients.ebi import (
     EBI_BASE_URL,
     POLLING_STATES,
     EBIJobRunner,
 )
-from bioinformatics_mcp.utils.errors import JobFailed, JobTimeoutError
-from bioinformatics_mcp.utils.rate_limit import RateLimitedClient
+from grounded_bio_mcp.utils.errors import JobFailed, JobTimeoutError
+from grounded_bio_mcp.utils.rate_limit import RateLimitedClient
 
 SERVICE = "clustalo"
 BASE = f"{EBI_BASE_URL}/{SERVICE}"
@@ -266,7 +266,7 @@ async def test_jitter_applied_with_expected_range(
         calls.append((a, b))
         return 1.0  # deterministic 'no jitter' for test reproducibility
 
-    monkeypatch.setattr("bioinformatics_mcp.clients.ebi.random.uniform", fake_uniform)
+    monkeypatch.setattr("grounded_bio_mcp.clients.ebi.random.uniform", fake_uniform)
 
     respx.post(f"{BASE}/run/").mock(return_value=httpx.Response(200, text="J"))
     respx.get(f"{BASE}/status/J").mock(
@@ -303,10 +303,10 @@ async def test_backoff_steps_up_after_several_polls(
         sleeps.append(duration)
         await real_sleep(0)  # still yield to event loop
 
-    monkeypatch.setattr("bioinformatics_mcp.clients.ebi.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("grounded_bio_mcp.clients.ebi.asyncio.sleep", fake_sleep)
     # Freeze jitter to 1.0 so we can see raw intervals.
     monkeypatch.setattr(
-        "bioinformatics_mcp.clients.ebi.random.uniform", lambda _a, _b: 1.0
+        "grounded_bio_mcp.clients.ebi.random.uniform", lambda _a, _b: 1.0
     )
 
     respx.post(f"{BASE}/run/").mock(return_value=httpx.Response(200, text="J"))

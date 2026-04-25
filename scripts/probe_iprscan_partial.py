@@ -31,9 +31,9 @@ from dataclasses import dataclass, field
 
 import httpx
 
-from bioinformatics_mcp.clients.base import RATE_LIMITS
-from bioinformatics_mcp.clients.ebi import EBIJobRunner
-from bioinformatics_mcp.utils.rate_limit import RateLimitedClient
+from grounded_bio_mcp.clients.base import RATE_LIMITS
+from grounded_bio_mcp.clients.ebi import EBIJobRunner
+from grounded_bio_mcp.utils.rate_limit import RateLimitedClient
 
 INSULIN = (
     "MALWMRLLPLLALLALWGPDPAAAFVNQHLCGSHLVEALYLVCGERGFFYTPKTRREAEDLQ"
@@ -80,13 +80,13 @@ async def _main() -> int:
         max_concurrent=rl.max_concurrent,
         min_interval_s=rl.min_interval_s,
         timeout=60.0,
-        headers={"User-Agent": "bioinformatics-mcp/0.2 (+probe)"},
+        headers={"User-Agent": "grounded-bio-mcp/0.2 (+probe)"},
     )
     # Separate raw client for the speculative /result/{jobId}/tsv polls so
     # we can observe 404s without EBIJobRunner's "raise on error" layer.
     raw = httpx.AsyncClient(
         timeout=60.0,
-        headers={"User-Agent": "bioinformatics-mcp/0.2 (+probe-raw)"},
+        headers={"User-Agent": "grounded-bio-mcp/0.2 (+probe-raw)"},
     )
 
     try:

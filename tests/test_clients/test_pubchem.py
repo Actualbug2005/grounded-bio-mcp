@@ -33,12 +33,12 @@ import httpx
 import pytest
 import respx
 
-from bioinformatics_mcp.clients.pubchem import (
+from grounded_bio_mcp.clients.pubchem import (
     PUBCHEM_BASE_URL,
     PubChemClient,
     PubChemCompoundNotFound,
 )
-from bioinformatics_mcp.utils.errors import (
+from grounded_bio_mcp.utils.errors import (
     ExternalServiceDown,
     RateLimitExceeded,
 )

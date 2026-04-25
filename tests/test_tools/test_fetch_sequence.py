@@ -15,9 +15,9 @@ import httpx
 import pytest
 import respx
 
-from bioinformatics_mcp.clients.ncbi import EUTILS_BASE_URL, NCBIClient
-from bioinformatics_mcp.config import Settings
-from bioinformatics_mcp.tools.fetch_sequence import fetch_sequence
+from grounded_bio_mcp.clients.ncbi import EUTILS_BASE_URL, NCBIClient
+from grounded_bio_mcp.config import Settings
+from grounded_bio_mcp.tools.fetch_sequence import fetch_sequence
 
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures"
 

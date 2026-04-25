@@ -8,12 +8,12 @@ import httpx
 import pytest
 import respx
 
-from bioinformatics_mcp.clients.rcsb import (
+from grounded_bio_mcp.clients.rcsb import (
     RCSB_DATA_BASE_URL,
     RCSB_FILES_BASE_URL,
     RCSBClient,
 )
-from bioinformatics_mcp.tools.fetch_pdb import (
+from grounded_bio_mcp.tools.fetch_pdb import (
     COORDINATES_SOFT_CAP_BYTES,
     fetch_pdb,
 )

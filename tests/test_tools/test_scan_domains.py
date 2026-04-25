@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from bioinformatics_mcp.tools.scan_domains import (
+from grounded_bio_mcp.tools.scan_domains import (
     ScanDomainsInput,
     _canonical_appl,
     _parse_matches,
@@ -131,7 +131,7 @@ async def test_bio_scan_domains_timeout_returns_tier3_error(
     fake_runner: MagicMock,
 ) -> None:
     """Tier-3 fallback: timeout = hard error, no partial results."""
-    from bioinformatics_mcp.utils.errors import JobTimeoutError
+    from grounded_bio_mcp.utils.errors import JobTimeoutError
 
     fake_runner.run.side_effect = JobTimeoutError(
         service="iprscan5",
@@ -156,7 +156,7 @@ async def test_bio_scan_domains_timeout_returns_tier3_error(
 async def test_bio_scan_domains_jobfailed_suggests_dna_misclassification(
     fake_runner: MagicMock,
 ) -> None:
-    from bioinformatics_mcp.utils.errors import JobFailed
+    from grounded_bio_mcp.utils.errors import JobFailed
 
     fake_runner.run.side_effect = JobFailed(
         service="iprscan5", job_id="J-BAD", status="FAILED"
@@ -193,8 +193,8 @@ async def test_bio_scan_domains_invalid_json_response_returns_actionable(
 )
 async def test_integration_insulin_finds_pfam_signature() -> None:
     """Real EBI InterProScan run — human insulin must match a Pfam signature."""
-    from bioinformatics_mcp.clients.ebi import EBIJobRunner
-    from bioinformatics_mcp.utils.rate_limit import RateLimitedClient
+    from grounded_bio_mcp.clients.ebi import EBIJobRunner
+    from grounded_bio_mcp.utils.rate_limit import RateLimitedClient
 
     email = os.environ["EBI_EMAIL"]
     rlc = RateLimitedClient(max_concurrent=3, min_interval_s=0.5, timeout=60.0)

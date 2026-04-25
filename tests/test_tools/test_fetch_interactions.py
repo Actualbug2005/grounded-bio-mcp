@@ -25,11 +25,11 @@ import httpx
 import pytest
 import respx
 
-from bioinformatics_mcp.clients.string_db import (
+from grounded_bio_mcp.clients.string_db import (
     STRING_BASE_URL,
     StringDBClient,
 )
-from bioinformatics_mcp.tools.fetch_interactions import bio_fetch_interactions
+from grounded_bio_mcp.tools.fetch_interactions import bio_fetch_interactions
 
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures"
 

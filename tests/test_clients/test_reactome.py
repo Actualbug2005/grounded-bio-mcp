@@ -27,11 +27,11 @@ import httpx
 import pytest
 import respx
 
-from bioinformatics_mcp.clients.reactome import (
+from grounded_bio_mcp.clients.reactome import (
     REACTOME_BASE_URL,
     ReactomeClient,
 )
-from bioinformatics_mcp.utils.errors import (
+from grounded_bio_mcp.utils.errors import (
     AccessionNotFound,
     ExternalServiceDown,
     RateLimitExceeded,

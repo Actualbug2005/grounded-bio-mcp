@@ -22,11 +22,11 @@ import httpx
 import pytest
 import respx
 
-from bioinformatics_mcp.clients.europepmc import (
+from grounded_bio_mcp.clients.europepmc import (
     EUROPEPMC_BASE_URL,
     EuropePMCClient,
 )
-from bioinformatics_mcp.tools.search_literature import bio_search_literature
+from grounded_bio_mcp.tools.search_literature import bio_search_literature
 
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures"
 

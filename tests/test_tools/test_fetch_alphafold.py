@@ -8,11 +8,11 @@ import httpx
 import pytest
 import respx
 
-from bioinformatics_mcp.clients.alphafold import (
+from grounded_bio_mcp.clients.alphafold import (
     ALPHAFOLD_BASE_URL,
     AlphaFoldClient,
 )
-from bioinformatics_mcp.tools.fetch_alphafold import fetch_alphafold
+from grounded_bio_mcp.tools.fetch_alphafold import fetch_alphafold
 
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures"
 

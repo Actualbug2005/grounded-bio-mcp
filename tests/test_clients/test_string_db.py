@@ -36,11 +36,11 @@ import httpx
 import pytest
 import respx
 
-from bioinformatics_mcp.clients.string_db import (
+from grounded_bio_mcp.clients.string_db import (
     STRING_BASE_URL,
     StringDBClient,
 )
-from bioinformatics_mcp.utils.errors import (
+from grounded_bio_mcp.utils.errors import (
     AccessionNotFound,
     ExternalServiceDown,
     RateLimitExceeded,

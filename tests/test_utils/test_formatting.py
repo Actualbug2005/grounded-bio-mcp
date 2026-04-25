@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from bioinformatics_mcp.utils.formatting import soft_cap_with_url_fallback
+from grounded_bio_mcp.utils.formatting import soft_cap_with_url_fallback
 
 
 def test_under_cap_returns_inlined_payload() -> None:

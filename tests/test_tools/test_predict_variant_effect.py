@@ -21,11 +21,11 @@ import httpx
 import pytest
 import respx
 
-from bioinformatics_mcp.clients.ensembl import (
+from grounded_bio_mcp.clients.ensembl import (
     ENSEMBL_REST_BASE_URL,
     EnsemblClient,
 )
-from bioinformatics_mcp.tools.predict_variant_effect import (
+from grounded_bio_mcp.tools.predict_variant_effect import (
     bio_predict_variant_effect,
 )
 

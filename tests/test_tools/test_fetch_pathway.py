@@ -25,11 +25,11 @@ import httpx
 import pytest
 import respx
 
-from bioinformatics_mcp.clients.reactome import (
+from grounded_bio_mcp.clients.reactome import (
     REACTOME_BASE_URL,
     ReactomeClient,
 )
-from bioinformatics_mcp.tools.fetch_pathway import bio_fetch_pathway
+from grounded_bio_mcp.tools.fetch_pathway import bio_fetch_pathway
 
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures"
 

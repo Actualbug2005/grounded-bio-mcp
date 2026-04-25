@@ -56,11 +56,11 @@ dmypy.json
 .env
 .env.*
 !.env.example
-/etc/bioinformatics_mcp/
+/etc/grounded_bio_mcp/
 
 # Runtime / server data paths (match spec §9 deployment layout)
-/var/lib/bioinformatics_mcp/
-var/lib/bioinformatics_mcp/
+/var/lib/grounded_bio_mcp/
+var/lib/grounded_bio_mcp/
 
 # IDE / editor
 .idea/

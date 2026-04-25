@@ -1,4 +1,4 @@
-# bioinformatics-mcp
+# grounded-bio-mcp
 
 A Model Context Protocol server that grounds molecular-biology answers in real
 fetches from primary databases — NCBI, UniProt, EBI, Ensembl, AlphaFold DB,
@@ -11,7 +11,7 @@ the spec §10.4 evaluation harness follow in Session 8b. CRISPOR's
 live-exec smoke is gated on `CRISPOR_LIVE=1` because the bundled
 CRISPOR distribution ships x86_64 binaries; Apple Silicon dev runs
 without Rosetta keep the live path skipped, the LXC exercises it.
-See [`bioinformatics-mcp-spec.md`](./bioinformatics-mcp-spec.md)
+See [`grounded-bio-mcp-spec.md`](./grounded-bio-mcp-spec.md)
 for the full specification and [`project-handoff.md`](./project-handoff.md)
 for the per-session brief.
 
@@ -47,13 +47,13 @@ RUN_INTEGRATION=1 pytest -m integration
 The server is launched via:
 
 ```bash
-bioinformatics-mcp        # streamable-HTTP on MCP_BIND_HOST:MCP_BIND_PORT
+grounded-bio-mcp        # streamable-HTTP on MCP_BIND_HOST:MCP_BIND_PORT
 ```
 
 or via the FastMCP CLI for stdio / MCP Inspector testing:
 
 ```bash
-fastmcp dev src/bioinformatics_mcp/server.py
+fastmcp dev src/grounded_bio_mcp/server.py
 ```
 
 ---
@@ -63,7 +63,7 @@ fastmcp dev src/bioinformatics_mcp/server.py
 See spec §5 for the canonical tree. Top-level overview:
 
 ```
-src/bioinformatics_mcp/
+src/grounded_bio_mcp/
   server.py          # FastMCP app + tool registration
   config.py          # env var loading via pydantic-settings
   clients/           # one module per upstream API
@@ -83,13 +83,13 @@ eval/                # evaluation.xml for mcp-builder style Q/A runs
 Production target is a **Debian 13 (Trixie) LXC** on Proxmox (pve2) behind a
 Caddy reverse proxy. See spec §9 for the full provisioning recipe. Summary:
 
-1. Unprivileged LXC, 4 vCPU / 6 GB RAM / 30 GB root + 80 GB `/var/lib/bioinformatics_mcp` mount.
+1. Unprivileged LXC, 4 vCPU / 6 GB RAM / 30 GB root + 80 GB `/var/lib/grounded_bio_mcp` mount.
 2. Service runs under the `bio-mcp` system user, `systemd` unit at
-   `/etc/systemd/system/bioinformatics-mcp.service`.
+   `/etc/systemd/system/grounded-bio-mcp.service`.
 3. Server binds to `127.0.0.1:8080`. Caddy (`bio-mcp.devlin.lan`) terminates
    TLS and requires `Authorization: Bearer $MCP_AUTH_TOKEN` before proxying.
 4. CRISPOR lives in its own venv at `/opt/crispor`; genome indexes under
-   `/var/lib/bioinformatics_mcp/genomes/`.
+   `/var/lib/grounded_bio_mcp/genomes/`.
 
 ### Python version policy
 
@@ -129,7 +129,7 @@ claude mcp add --transport http bioinformatics https://bio-mcp.devlin.lan/mcp \
 ## Deviations from spec
 
 These are conscious, approved departures from
-[`bioinformatics-mcp-spec_1.md`](./bioinformatics-mcp-spec_1.md). They exist
+[`grounded-bio-mcp-spec_1.md`](./grounded-bio-mcp-spec_1.md). They exist
 so future sessions don't re-litigate them.
 
 ### MCP framework: `fastmcp` (jlowin's standalone) instead of `mcp[cli]`

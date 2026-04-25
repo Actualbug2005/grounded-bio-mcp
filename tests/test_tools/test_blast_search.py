@@ -24,14 +24,14 @@ import httpx
 import pytest
 import respx
 
-from bioinformatics_mcp.clients.ncbi import (
+from grounded_bio_mcp.clients.ncbi import (
     BLAST_BASE_URL,
     NCBIClient,
     _parse_qblast_info,
 )
-from bioinformatics_mcp.config import Settings
-from bioinformatics_mcp.tools.blast_search import bio_blast_search
-from bioinformatics_mcp.utils.errors import JobFailed, JobTimeoutError
+from grounded_bio_mcp.config import Settings
+from grounded_bio_mcp.tools.blast_search import bio_blast_search
+from grounded_bio_mcp.utils.errors import JobFailed, JobTimeoutError
 
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures"
 

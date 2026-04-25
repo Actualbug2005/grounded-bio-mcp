@@ -2,7 +2,7 @@
 
 The tool has no upstream API — codon usage tables are resolved from
 ``python_codon_tables`` (3 organisms) or from bundled Kazusa CSVs under
-``src/bioinformatics_mcp/data/codon_tables/`` (the other 3). Tests are
+``src/grounded_bio_mcp/data/codon_tables/`` (the other 3). Tests are
 therefore wholly offline; no integration suite exists for this tool.
 """
 
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from bioinformatics_mcp.tools.codon_optimise import (
+from grounded_bio_mcp.tools.codon_optimise import (
     SUPPORTED_ORGANISMS,
     _compute_cai,
     _compute_gc_pct,

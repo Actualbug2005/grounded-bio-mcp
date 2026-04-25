@@ -27,13 +27,13 @@ from pathlib import Path
 
 import pytest
 
-from bioinformatics_mcp.clients.crispor import (
+from grounded_bio_mcp.clients.crispor import (
     CrisporRunFailed,
     CrisporRunner,
     GenomeIndexNotFound,
 )
-from bioinformatics_mcp.config import get_settings
-from bioinformatics_mcp.tools.design_grna import bio_design_grna
+from grounded_bio_mcp.config import get_settings
+from grounded_bio_mcp.tools.design_grna import bio_design_grna
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 

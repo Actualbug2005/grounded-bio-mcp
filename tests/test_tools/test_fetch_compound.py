@@ -22,9 +22,9 @@ import httpx
 import pytest
 import respx
 
-from bioinformatics_mcp.clients.chembl import CHEMBL_BASE_URL, ChEMBLClient
-from bioinformatics_mcp.clients.pubchem import PUBCHEM_BASE_URL, PubChemClient
-from bioinformatics_mcp.tools.fetch_compound import bio_fetch_compound
+from grounded_bio_mcp.clients.chembl import CHEMBL_BASE_URL, ChEMBLClient
+from grounded_bio_mcp.clients.pubchem import PUBCHEM_BASE_URL, PubChemClient
+from grounded_bio_mcp.tools.fetch_compound import bio_fetch_compound
 
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures"
 

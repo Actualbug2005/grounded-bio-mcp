@@ -29,11 +29,11 @@ import httpx
 import pytest
 import respx
 
-from bioinformatics_mcp.clients.europepmc import (
+from grounded_bio_mcp.clients.europepmc import (
     EUROPEPMC_BASE_URL,
     EuropePMCClient,
 )
-from bioinformatics_mcp.utils.errors import (
+from grounded_bio_mcp.utils.errors import (
     AccessionNotFound,
     ExternalServiceDown,
     RateLimitExceeded,

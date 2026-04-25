@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "bioinformatics-mcp"
+name = "grounded-bio-mcp"
 version = "0.2.0"
 description = "Primary-source bioinformatics MCP server — grounds sequence / structure / variant / compound / literature answers in real database fetches rather than training-data pattern matching."
 readme = "README.md"
@@ -37,10 +37,10 @@ dev = [
 ]
 
 [project.scripts]
-bioinformatics-mcp = "bioinformatics_mcp.server:main"
+grounded-bio-mcp = "grounded_bio_mcp.server:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/bioinformatics_mcp"]
+packages = ["src/grounded_bio_mcp"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
