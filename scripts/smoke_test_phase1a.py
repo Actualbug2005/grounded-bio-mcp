@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
-"""End-to-end smoke test — phases 1 + 2 + 3 (15 tools).
+"""End-to-end smoke test — phases 1 + 2 + 3 (17 tools).
 
 Calls every registered tool (``bio_fetch_sequence``, ``bio_fetch_uniprot``,
 ``bio_fetch_pdb``, ``bio_fetch_alphafold``, ``bio_align_sequences``,
 ``bio_scan_domains``, ``bio_fetch_compound``, ``bio_fetch_bioactivity``,
 ``bio_fetch_variant``, ``bio_predict_variant_effect``, ``bio_fetch_gene``,
 ``bio_search_literature``, ``bio_fetch_paper_fulltext``,
-``bio_fetch_pathway``, ``bio_fetch_interactions``) through the in-process
-FastMCP client — i.e. the same handshake path Claude would use — against
-real upstream APIs, with the spec §10.2 test accessions. Prints a
-pass/fail summary and exits non-zero on any failure.
+``bio_fetch_pathway``, ``bio_fetch_interactions``, ``bio_blast_search``,
+``bio_codon_optimise``) through the in-process FastMCP client — i.e.
+the same handshake path Claude would use — against real upstream APIs
+(except ``bio_codon_optimise`` which is purely local), with the spec
+§10.2 test accessions. Prints a pass/fail summary and exits non-zero
+on any failure.
+
+The BLAST smoke can run several minutes during NCBI peak hours; the
+case sets ``max_wait_seconds=900`` to give NCBI head-room.
 
 The two EBI async tools are gated on EBI_EMAIL: without it, they
 exercise the graceful "EBI_EMAIL required" error path rather than
@@ -440,6 +445,73 @@ def _build_cases() -> list[tuple[str, dict[str, Any], Any]]:
                 f"min_score={p['query']['min_score']}",
             )[-1],
         ),
+        (
+            "bio_codon_optimise",
+            {
+                # Insulin signal peptide (P01308 residues 1-24) — the
+                # prompt's nominated codon-optimiser smoke substrate.
+                "protein_sequence": "MALWMRLLPLLALLALWGPDPAAA",
+                "target_organism": "ecoli_k12",
+                "avoid_restriction_sites": ["GAATTC", "AAGCTT"],  # EcoRI + HindIII
+            },
+            lambda p: (
+                _assert(
+                    p.get("error") is not True,
+                    f"codon_optimise errored: {p.get('message')}",
+                ),
+                _assert(
+                    p["length_nt"] == (24 + 1) * 3,  # 24 aa + stop
+                    f"length_nt={p['length_nt']}, expected 75",
+                ),
+                _assert(
+                    p["codon_adaptation_index"] >= 0.95,
+                    f"CAI={p['codon_adaptation_index']}, expected ≥0.95 (no avoidance hits)",
+                ),
+                _assert(
+                    "GAATTC" not in p["optimised_sequence"],
+                    "EcoRI site survived in optimised sequence",
+                ),
+                _assert(
+                    "AAGCTT" not in p["optimised_sequence"],
+                    "HindIII site survived in optimised sequence",
+                ),
+                f"len={p['length_nt']}nt CAI={p['codon_adaptation_index']} "
+                f"GC%={p['gc_content_pct']} rare={p['rare_codon_count']}",
+            )[-1],
+        ),
+        (
+            "bio_blast_search",
+            {
+                # Insulin B chain — blastp / swissprot / 5 hits.
+                # max_wait_seconds=900 (15 min) gives NCBI head-room
+                # during peak hours; live wall time is typically 1-13 min.
+                "query_sequence": "FVNQHLCGSHLVEALYLVCGERGFFYTPKT",
+                "program": "blastp",
+                "database": "swissprot",
+                "max_hits": 5,
+                "e_value": 1.0,
+                "max_wait_seconds": 900,
+            },
+            lambda p: (
+                _assert(
+                    p.get("error") is not True,
+                    f"blast_search errored: {p.get('message')}",
+                ),
+                _assert(p["program"] == "blastp", f"program={p['program']}"),
+                _assert(p["database"] == "swissprot", f"database={p['database']}"),
+                _assert(
+                    p["hit_count"] >= 1,
+                    "expected at least one swissprot insulin homologue",
+                ),
+                _assert(
+                    any("INS" in h["description"].upper() or "INSULIN" in h["description"].upper()
+                        for h in p["hits"]),
+                    "no insulin hit found in BLAST results",
+                ),
+                f"hits={p['hit_count']} top E-value={p['hits'][0]['e_value']:.2e} "
+                f"top accession={p['hits'][0]['accession']}",
+            )[-1],
+        ),
     ]
 
 
@@ -524,6 +596,8 @@ async def run() -> int:
             "bio_fetch_paper_fulltext",
             "bio_fetch_pathway",
             "bio_fetch_interactions",
+            "bio_blast_search",
+            "bio_codon_optimise",
         }
         missing = expected - names
         if missing:
