@@ -37,6 +37,7 @@ from bioinformatics_mcp.clients.string_db import StringDBClient
 from bioinformatics_mcp.clients.uniprot import UniProtClient
 from bioinformatics_mcp.config import get_settings
 from bioinformatics_mcp.tools.align_sequences import bio_align_sequences as _align_impl
+from bioinformatics_mcp.tools.blast_search import bio_blast_search as _blast_impl
 from bioinformatics_mcp.tools.codon_optimise import (
     bio_codon_optimise as _codon_optimise_impl,
 )
@@ -105,6 +106,7 @@ Tool selection guide (spec §3):
 | "What does paper X actually say?"                    | bio_fetch_paper_fulltext   | bio_search_literature (for candidate IDs)|
 | "What pathway is protein X in?"                      | bio_fetch_pathway          | bio_fetch_uniprot (for protein-level context)|
 | "What does protein X interact with?"                 | bio_fetch_interactions     | —                                        |
+| "What sequences are similar to this one?"            | bio_blast_search           | bio_align_sequences (for known set)      |
 | "Design a DNA sequence to express protein X in host Y." | bio_codon_optimise      | —                                        |
 
 bio_fetch_compound answers "what IS this compound" — SMILES, InChI, MW,
@@ -173,6 +175,21 @@ Default min_score=700 is high confidence; use 400 for medium, 900
 for highest. DO NOT fabricate protein-protein interactions from
 training data — use this tool.
 
+bio_blast_search answers "find sequences similar to this one" — NCBI
+BLAST URL API submit→poll→fetch with the four standard programs
+(blastn/blastp/blastx/tblastn) and the five common databases
+(nt/nr/refseq_protein/refseq_rna/swissprot). Distinct from
+bio_align_sequences: BLAST searches the entire database for matches to
+your query, while align_sequences aligns a known set of sequences you
+already have. Hits chain naturally to bio_fetch_uniprot (protein
+accessions like P01316) and bio_fetch_sequence (any NCBI accession).
+Top-5 hits include alignment strings; the rest are metadata-only.
+identical_sequence_count surfaces when one BLAST hit collapses
+multiple identical DB records into a single result. Empty hits are
+valid (truly novel sequences exist) and should not be treated as
+errors. Set max_wait_seconds higher (up to 1800) for nr / blastn jobs
+that legitimately take many minutes during peak hours.
+
 bio_codon_optimise answers "design a DNA sequence to express this
 protein in host Y" — greedy frequency-max codon optimisation against
 six expression-host codon usage tables (E. coli, human, S. cerevisiae,
@@ -186,9 +203,9 @@ for the other three under data/codon_tables/).
 Phase 1 exposed eight tools. Phase 2 added bio_fetch_gene,
 bio_fetch_variant, and bio_predict_variant_effect. Phase 3 added
 bio_search_literature, bio_fetch_paper_fulltext (spec §4.14, §4.15),
-bio_fetch_pathway (§4.17), and bio_fetch_interactions (§4.18). Phase 3
-final: bio_codon_optimise (§4.19). Final tool remaining is bio_design_grna
-(CRISPOR, §4.7).
+bio_fetch_pathway (§4.17), and bio_fetch_interactions (§4.18). This
+session: bio_blast_search (§4.6) and bio_codon_optimise (§4.19) —
+17 tools live. Final tool remaining is bio_design_grna (CRISPOR, §4.7).
 
 Confidence caveats (anti-hallucination):
   - AlphaFold predictions include per-residue pLDDT; regions with pLDDT < 70
@@ -848,6 +865,59 @@ async def bio_fetch_interactions(
         min_score=min_score,
         max_partners=max_partners,
         client=_string_client(),
+    )
+
+
+@mcp.tool(
+    title="BLAST Sequence Search",
+    annotations={
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "openWorldHint": True,
+        # NCBI databases grow between runs; the same query may return
+        # additional hits next month. idempotentHint=False on purpose.
+        "idempotentHint": False,
+    },
+)
+async def bio_blast_search(
+    query_sequence: str,
+    program: Literal["blastn", "blastp", "blastx", "tblastn"],
+    database: Literal["nt", "nr", "refseq_protein", "refseq_rna", "swissprot"],
+    organism_filter: str | None = None,
+    max_hits: int = 20,
+    e_value: float = 10.0,
+    max_wait_seconds: int | None = None,
+) -> dict[str, Any]:
+    """Sequence-similarity search against NCBI BLAST.
+
+    Submit → poll → fetch with NCBI-etiquette polling (15 s initial,
+    ramping to 60 s after 5 min wall time, jittered 0.8-1.2×). Default
+    timeout 600 s; caller-overridable up to 1800 s for slow nr/blastn
+    jobs during peak hours. Empty hit lists are valid output, not an
+    error — truly novel sequences with no homologues exist.
+
+    Per-hit output: accession, organism, E-value, bit score, %identity,
+    %query coverage, alignment positions. Top-5 hits also include
+    qseq/hseq/midline so callers can verify alignment quality. Multiple
+    identical sequences across DB records collapse into one hit with
+    ``identical_sequence_count`` reflecting the collapse.
+
+    organism_filter accepts NCBI Entrez query syntax — e.g.
+    ``"Felis catus[ORGN]"``, ``"Mammalia[ORGN]"``.
+
+    BLAST hits chain naturally to ``bio_fetch_uniprot`` (UniProt
+    accessions in the swissprot database) and ``bio_fetch_sequence``
+    (any NCBI accession).
+    """
+    return await _blast_impl(
+        query_sequence=query_sequence,
+        program=program,
+        database=database,
+        organism_filter=organism_filter,
+        max_hits=max_hits,
+        e_value=e_value,
+        max_wait_seconds=max_wait_seconds,
+        client=_ncbi_client(),
     )
 
 

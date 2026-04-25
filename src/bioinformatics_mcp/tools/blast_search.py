@@ -17,7 +17,7 @@ the top N hits to keep the structured payload tractable.
 
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -52,10 +52,6 @@ class BlastSearchInput(BaseModel):
     )
 
 
-class _BlastClient(Protocol):
-    async def blast_run(self, **kwargs: Any) -> dict[str, Any]: ...
-
-
 async def bio_blast_search(
     query_sequence: str,
     program: str,
@@ -65,7 +61,7 @@ async def bio_blast_search(
     e_value: float = 10.0,
     max_wait_seconds: int | None = None,
     *,
-    client: _BlastClient,
+    client: Any,  # NCBIClient at runtime; duck-typed so tests pass a fake.
 ) -> dict[str, Any]:
     """Run a BLAST search and return per-hit summary + alignment data.
 
