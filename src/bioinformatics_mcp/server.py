@@ -26,6 +26,7 @@ from bioinformatics_mcp import __version__
 from bioinformatics_mcp.clients.alphafold import AlphaFoldClient
 from bioinformatics_mcp.clients.base import RATE_LIMITS
 from bioinformatics_mcp.clients.chembl import ChEMBLClient
+from bioinformatics_mcp.clients.crispor import CrisporRunner
 from bioinformatics_mcp.clients.ebi import EBIJobRunner
 from bioinformatics_mcp.clients.ensembl import EnsemblClient
 from bioinformatics_mcp.clients.europepmc import EuropePMCClient
@@ -40,6 +41,9 @@ from bioinformatics_mcp.tools.align_sequences import bio_align_sequences as _ali
 from bioinformatics_mcp.tools.blast_search import bio_blast_search as _blast_impl
 from bioinformatics_mcp.tools.codon_optimise import (
     bio_codon_optimise as _codon_optimise_impl,
+)
+from bioinformatics_mcp.tools.design_grna import (
+    bio_design_grna as _design_grna_impl,
 )
 from bioinformatics_mcp.tools.fetch_alphafold import fetch_alphafold
 from bioinformatics_mcp.tools.fetch_bioactivity import (
@@ -112,6 +116,7 @@ Tool selection guide (spec §3):
 | "What sequences are similar to this one?"            | bio_blast_search           | bio_align_sequences (for known set)      |
 | "Design a DNA sequence to express protein X in host Y." | bio_codon_optimise      | —                                        |
 | "Will this ssODN / RNA fold well? What's its structure?" | bio_fold_sequence       | —                                        |
+| "Design a CRISPR guide for target X."                | bio_design_grna            | —                                        |
 
 bio_fetch_compound answers "what IS this compound" — SMILES, InChI, MW,
 LogP, clinical phase, synonyms — from ChEMBL (drug-curated) and PubChem
@@ -214,13 +219,29 @@ summary from the equilibrium partition function. Default temperature
 inputs; provenance carries the ViennaRNA version so any reported
 structure can be reproduced exactly.
 
+bio_design_grna answers "design a CRISPR guide for this target with
+real off-target analysis." CRISPOR subprocess against an indexed
+genome; returns top-N guides ranked by MIT specificity, each with
+spacer + PAM split, on-target locus, per-model efficiency scores
+(Doench '16 / Moreno-Mateos / Azimuth / etc.), CFD specificity
+computed locally per Doench 2016, and a real off-target table —
+every row a BWA-verified mismatch-tolerant hit, every locus_class a
+CRISPOR segments.bed lookup. NotEnoughFlankSeq in efficiency scores
+surfaces as null + reason rather than silent zero. The single most
+important anti-hallucination tool in the server: DO NOT pattern-match
+guide sequences or off-target tables from training data — use this
+tool. Genomes must be pre-indexed under GENOME_DIR; sacCer3 ships
+with CRISPOR, felCat9/hg38/mm39 install per the LXC genome-fetch
+process.
+
 Phase 1 exposed eight tools. Phase 2 added bio_fetch_gene,
 bio_fetch_variant, and bio_predict_variant_effect. Phase 3 added
 bio_search_literature, bio_fetch_paper_fulltext (spec §4.14, §4.15),
 bio_fetch_pathway (§4.17), and bio_fetch_interactions (§4.18).
 Session 7 added bio_blast_search (§4.6) and bio_codon_optimise (§4.19).
-Session 8a added bio_fold_sequence (§4.8). 18 tools live; final tool
-remaining is bio_design_grna (CRISPOR, §4.7).
+Session 8a added bio_fold_sequence (§4.8) and bio_design_grna (§4.7),
+completing the v2 spec — 19 tools live. Phase 4 (additional design /
+validation tools) lands in subsequent sessions.
 
 Confidence caveats (anti-hallucination):
   - AlphaFold predictions include per-residue pLDDT; regions with pLDDT < 70
@@ -329,6 +350,27 @@ def _string_client() -> StringDBClient:
     # STRING_USER_EMAIL is optional (unlike EBI_EMAIL); missing email
     # only produces a warning at client init. See `clients/string_db.py`.
     return StringDBClient(user_email=get_settings().string_user_email)
+
+
+@lru_cache(maxsize=1)
+def _crispor_runner() -> CrisporRunner:
+    """Single CRISPOR subprocess runner per server process.
+
+    Paths come from settings: ``CRISPOR_PATH`` (CRISPOR install dir),
+    ``CRISPOR_PYTHON`` (the venv Python that resolves CRISPOR's
+    requirements), ``GENOME_DIR`` (where indexed genomes live). Defaults
+    target the LXC layout (``/opt/crispor`` etc.); dev overrides via
+    ``.env``. The runner itself is stateless — each ``run`` call
+    materialises its own temp directory — so caching one instance per
+    process is safe under concurrent tool invocations.
+    """
+    s = get_settings()
+    return CrisporRunner(
+        crispor_python=s.crispor_python,
+        crispor_path=s.crispor_path,
+        genomes_dir=s.genome_dir,
+        timeout_s=300.0,
+    )
 
 
 @lru_cache(maxsize=1)
@@ -1003,6 +1045,56 @@ async def bio_fold_sequence(
         sequence=sequence,
         sequence_type=sequence_type,
         temperature=temperature,
+    )
+
+
+@mcp.tool(
+    title="Design CRISPR gRNA (CRISPOR)",
+    annotations=_READ_ONLY_ANNOTATIONS,
+)
+async def bio_design_grna(
+    target_sequence: str,
+    genome: str,
+    pam: Literal["NGG", "NG", "NNGRRT", "TTTV"] = "NGG",
+    max_guides: int = 10,
+    max_off_target_mismatches: int = 4,
+) -> dict[str, Any]:
+    """CRISPR gRNA design with real off-target analysis (CRISPOR wrapper).
+
+    Returns ranked guides (top-N by MIT specificity) for ``target_sequence``
+    against an indexed genome, with **real** off-target tables — every
+    off-target row is a verified mismatch-tolerant hit that BWA found in
+    the genome, not a fabricated row. This is the single most important
+    anti-hallucination tool in the server: without it, models produce
+    plausible-looking guide sequences and entirely invented off-target
+    tables that look credible until biologists try to use them.
+
+    Per-guide output: 20 nt spacer + 3 nt PAM split, on-target locus
+    (chrom:start derived from the 0-mm self-match in the off-target
+    table), MIT specificity score, CFD specificity computed locally per
+    Doench 2016, per-model efficiency scores (Doench '16 / Moreno-Mateos
+    / Azimuth / etc.) with explicit nullability — ``NotEnoughFlankSeq``
+    surfaces as null with ``score_unavailable_reason`` rather than
+    silently zero.
+
+    Off-target table per guide carries chromosome, position, sequence,
+    mismatch count, mismatch pattern, MIT + CFD scores, strand, and a
+    ``locus_class`` (CDS / intron / intergenic / unknown) from CRISPOR's
+    segments.bed. Truncated at 100 entries with ``off_targets_truncated``
+    + ``total_off_targets`` so the cap is visible.
+
+    Genome must be pre-indexed under ``GENOME_DIR/<genome>/``; sacCer3
+    ships with CRISPOR. felCat9 / hg38 / mm39 install on the LXC during
+    Session 8b. PAM defaults to NGG (SpCas9); NG / NNGRRT (SaCas9) /
+    TTTV (Cpf1) supported.
+    """
+    return await _design_grna_impl(
+        target_sequence=target_sequence,
+        genome=genome,
+        pam=pam,
+        max_guides=max_guides,
+        max_off_target_mismatches=max_off_target_mismatches,
+        runner=_crispor_runner(),
     )
 
 
