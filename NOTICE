@@ -1,0 +1,76 @@
+grounded-bio-mcp
+Copyright 2026 Devlin
+
+This product includes software developed by Devlin and the contributors
+to the grounded-bio-mcp project, licensed under the Apache Licence,
+Version 2.0 (see LICENSE).
+
+================================================================================
+Third-party components
+================================================================================
+
+This product depends on (but does not redistribute) the following Python
+packages, each governed by its own upstream licence. Users install these
+from PyPI under the upstream terms.
+
+Runtime dependencies
+--------------------
+
+  fastmcp (>=3.0,<4.0) ........... Apache Licence 2.0
+                                   https://github.com/jlowin/fastmcp
+
+  pydantic (>=2.9) ............... MIT Licence
+                                   https://github.com/pydantic/pydantic
+
+  pydantic-settings (>=2.5) ...... MIT Licence
+                                   https://github.com/pydantic/pydantic-settings
+
+  httpx (>=0.27) ................. BSD 3-Clause Licence
+                                   https://github.com/encode/httpx
+
+  biopython (>=1.84) ............. Biopython Licence Agreement (permissive,
+                                   BSD-style with attribution requirement)
+                                   https://biopython.org/
+
+  viennarna (>=2.6.4) ............ Custom academic licence — see Section 11.4
+                                   of the project specification. Research,
+                                   educational, and commercial use permitted;
+                                   redistribution-for-fee prohibited;
+                                   attribution to the authors and the
+                                   Institute for Theoretical Chemistry of
+                                   the University of Vienna required.
+                                   https://www.tbi.univie.ac.at/RNA
+
+  tenacity (>=9.0) ............... Apache Licence 2.0
+                                   https://github.com/jd/tenacity
+
+  python-dotenv (>=1.0) .......... BSD 3-Clause Licence
+                                   https://github.com/theskumar/python-dotenv
+
+  python-codon-tables (>=0.1.12) . CC0 1.0 Universal (public-domain dedication)
+                                   https://github.com/Edinburgh-Genome-Foundry/python_codon_tables
+
+  lxml (>=5.0) ................... BSD 3-Clause Licence
+                                   https://lxml.de/
+
+External tools invoked via subprocess
+-------------------------------------
+
+  CRISPOR ........................ MIT Licence (per upstream repository).
+                                   Genome indexes and the bundled `bin/`
+                                   binaries carry their own respective
+                                   licences. CRISPOR is installed locally
+                                   from https://github.com/maximilianh/crisporWebsite
+                                   and is not redistributed by this project.
+
+================================================================================
+Per-source attribution requirement
+================================================================================
+
+This server retrieves data from public biomedical databases at query time.
+Users embedding `grounded-bio-mcp` in publications are expected to cite the
+upstream sources of any data they rely on (NCBI, UniProt, RCSB PDB,
+AlphaFold DB, EBI, ChEMBL, PubChem, Ensembl, Europe PMC, Reactome, STRING,
+Kazusa, NCBI BLAST, CRISPOR), not (or not only) this server. Per-source
+citation expectations are documented in each tool's docstring and in the
+project README.

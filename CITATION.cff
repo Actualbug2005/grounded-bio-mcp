@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: >-
+  If you use grounded-bio-mcp in research or other published work,
+  please cite both this software and the upstream biomedical databases
+  whose data it retrieves at query time.
+title: "grounded-bio-mcp"
+abstract: >-
+  A Model Context Protocol server that grounds large-language-model
+  answers in molecular biology by retrieving from primary databases
+  (NCBI, UniProt, RCSB PDB, AlphaFold DB, EBI, ChEMBL, PubChem, Ensembl,
+  Europe PMC, Reactome, STRING, NCBI BLAST, CRISPOR, ViennaRNA,
+  Kazusa codon tables) instead of pattern-matching from training data.
+type: software
+authors:
+  - family-names: Devlin
+    given-names: Devlin
+version: 0.3.0
+date-released: "2026-04-25"
+license: Apache-2.0
+repository-code: "https://github.com/Actualbug2005/grounded-bio-mcp"
+keywords:
+  - bioinformatics
+  - model-context-protocol
+  - mcp
+  - large-language-models
+  - retrieval-augmented-generation
+  - hallucination-mitigation
+  - clinical-genomics
+  - drug-discovery
