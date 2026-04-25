@@ -60,6 +60,9 @@ from bioinformatics_mcp.tools.fetch_pdb import fetch_pdb
 from bioinformatics_mcp.tools.fetch_sequence import fetch_sequence
 from bioinformatics_mcp.tools.fetch_uniprot import fetch_uniprot
 from bioinformatics_mcp.tools.fetch_variant import bio_fetch_variant as _variant_impl
+from bioinformatics_mcp.tools.fold_sequence import (
+    bio_fold_sequence as _fold_impl,
+)
 from bioinformatics_mcp.tools.predict_variant_effect import (
     bio_predict_variant_effect as _vep_impl,
 )
@@ -108,6 +111,7 @@ Tool selection guide (spec §3):
 | "What does protein X interact with?"                 | bio_fetch_interactions     | —                                        |
 | "What sequences are similar to this one?"            | bio_blast_search           | bio_align_sequences (for known set)      |
 | "Design a DNA sequence to express protein X in host Y." | bio_codon_optimise      | —                                        |
+| "Will this ssODN / RNA fold well? What's its structure?" | bio_fold_sequence       | —                                        |
 
 bio_fetch_compound answers "what IS this compound" — SMILES, InChI, MW,
 LogP, clinical phase, synonyms — from ChEMBL (drug-curated) and PubChem
@@ -195,17 +199,28 @@ protein in host Y" — greedy frequency-max codon optimisation against
 six expression-host codon usage tables (E. coli, human, S. cerevisiae,
 P. pastoris, CHO, Sf9), with synonymous-codon swaps to avoid forbidden
 restriction sites. Reports CAI, GC%, rare-codon count, and any
-restriction-site conflicts that survived (genuinely unavoidable). The
-ONLY tool with openWorldHint=False — no upstream API, all data ships
-locally (python-codon-tables for three organisms; bundled Kazusa CSVs
-for the other three under data/codon_tables/).
+restriction-site conflicts that survived (genuinely unavoidable).
+openWorldHint=False — no upstream API, all data ships locally
+(python-codon-tables for three organisms; bundled Kazusa CSVs for the
+other three under data/codon_tables/).
+
+bio_fold_sequence answers "what's the predicted secondary structure of
+this RNA / DNA?" — ViennaRNA Python bindings under the Turner 2004
+(RNA) or Mathews 2004 (DNA) parameter set, returning MFE dot-bracket
+structure, ΔG in kcal/mol, and a per-position base-pairing probability
+summary from the equilibrium partition function. Default temperature
+37 °C; range 0-100 °C. Like bio_codon_optimise this is local-only
+(openWorldHint=False) — no upstream API. Deterministic for fixed
+inputs; provenance carries the ViennaRNA version so any reported
+structure can be reproduced exactly.
 
 Phase 1 exposed eight tools. Phase 2 added bio_fetch_gene,
 bio_fetch_variant, and bio_predict_variant_effect. Phase 3 added
 bio_search_literature, bio_fetch_paper_fulltext (spec §4.14, §4.15),
-bio_fetch_pathway (§4.17), and bio_fetch_interactions (§4.18). This
-session: bio_blast_search (§4.6) and bio_codon_optimise (§4.19) —
-17 tools live. Final tool remaining is bio_design_grna (CRISPOR, §4.7).
+bio_fetch_pathway (§4.17), and bio_fetch_interactions (§4.18).
+Session 7 added bio_blast_search (§4.6) and bio_codon_optimise (§4.19).
+Session 8a added bio_fold_sequence (§4.8). 18 tools live; final tool
+remaining is bio_design_grna (CRISPOR, §4.7).
 
 Confidence caveats (anti-hallucination):
   - AlphaFold predictions include per-residue pLDDT; regions with pLDDT < 70
@@ -223,11 +238,13 @@ _READ_ONLY_ANNOTATIONS: dict[str, bool] = {
     "idempotentHint": True,
 }
 
-# bio_codon_optimise is the *only* tool that does not query external state —
-# everything resolves from python-codon-tables and the bundled Kazusa CSVs.
-# That's why openWorldHint flips to False here. idempotentHint=True because
-# the frequency_max algorithm is fully deterministic for fixed inputs.
-_CODON_OPTIMISE_ANNOTATIONS: dict[str, bool] = {
+# Tools that compute purely from local data with no upstream API touch.
+# Currently bio_codon_optimise (python-codon-tables + bundled Kazusa CSVs)
+# and bio_fold_sequence (ViennaRNA Python bindings). openWorldHint flips to
+# False because there is no external corpus that could change between calls;
+# idempotentHint stays True because both algorithms are deterministic for
+# fixed inputs.
+_LOCAL_COMPUTE_ANNOTATIONS: dict[str, bool] = {
     "readOnlyHint": True,
     "destructiveHint": False,
     "openWorldHint": False,
@@ -923,7 +940,7 @@ async def bio_blast_search(
 
 @mcp.tool(
     title="Codon-Optimise Sequence",
-    annotations=_CODON_OPTIMISE_ANNOTATIONS,
+    annotations=_LOCAL_COMPUTE_ANNOTATIONS,
 )
 async def bio_codon_optimise(
     protein_sequence: str,
@@ -956,6 +973,36 @@ async def bio_codon_optimise(
         protein_sequence=protein_sequence,
         target_organism=target_organism,
         avoid_restriction_sites=avoid_restriction_sites,
+    )
+
+
+@mcp.tool(
+    title="Fold RNA/DNA Sequence",
+    annotations=_LOCAL_COMPUTE_ANNOTATIONS,
+)
+async def bio_fold_sequence(
+    sequence: str,
+    sequence_type: Literal["rna", "dna"],
+    temperature: float = 37.0,
+) -> dict[str, Any]:
+    """RNA / DNA secondary structure prediction via ViennaRNA Python bindings.
+
+    Returns the spec §4.8 output: ``structure`` (MFE dot-bracket),
+    ``mfe_kcal_per_mol`` (the equilibrium ΔG of the MFE structure under
+    Turner 2004 (RNA) or Mathews 2004 (DNA) parameters), and
+    ``base_pair_probabilities`` (mean pair probability and per-position
+    pairing probability list from the equilibrium partition function).
+
+    Default temperature 37 °C; range 0-100 °C. Determinism: ViennaRNA's
+    MFE algorithm is fully deterministic for fixed inputs; the
+    ``provenance`` block carries the ViennaRNA version so any result
+    can be reproduced exactly. Like ``bio_codon_optimise``, this tool
+    is local-only (``openWorldHint=False``) — no upstream API.
+    """
+    return await _fold_impl(
+        sequence=sequence,
+        sequence_type=sequence_type,
+        temperature=temperature,
     )
 
 
