@@ -30,6 +30,7 @@ from bioinformatics_mcp.clients.ncbi import (
     _parse_qblast_info,
 )
 from bioinformatics_mcp.config import Settings
+from bioinformatics_mcp.tools.blast_search import bio_blast_search
 from bioinformatics_mcp.utils.errors import JobFailed, JobTimeoutError
 
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures"
@@ -241,6 +242,236 @@ async def test_blast_run_raises_on_failed_status(ncbi) -> None:
             max_interval=0.001,
             max_wait_seconds=5.0,
         )
+
+
+# ---- bio_blast_search tool layer ----------------------------------------
+
+
+def _make_hit(*, num: int, accession: str, sciname: str, evalue: float,
+              extra_descriptions: int = 0) -> dict:
+    """Build a synthetic BLAST hit dict matching the JSON2_S shape."""
+    descriptions = [{
+        "id": f"sp|{accession}.1|",
+        "accession": accession,
+        "title": f"Synthetic protein from {sciname}",
+        "taxid": 9606 + num,
+        "sciname": sciname,
+    }]
+    for i in range(extra_descriptions):
+        descriptions.append({
+            "id": f"tr|FAKE{accession}{i}|",
+            "accession": f"FAKE{accession}{i}",
+            "title": f"Identical sequence {i} from {sciname}",
+            "taxid": 9606 + num,
+            "sciname": sciname,
+        })
+    return {
+        "num": num,
+        "description": descriptions,
+        "len": 100,
+        "hsps": [{
+            "num": 1,
+            "bit_score": 100.0 - num * 5,
+            "score": 200,
+            "evalue": evalue,
+            "identity": 30,
+            "positive": 32,
+            "query_from": 1,
+            "query_to": 31,
+            "hit_from": 10,
+            "hit_to": 40,
+            "align_len": 31,
+            "gaps": 0,
+            "qseq": "MFVNQHLCGSHLVEALYLVCGERGFFYTPKT",
+            "hseq": "MFVNQHLCGSHLVEALYLVCGERGFFYTPK_",
+            "midline": "||||||||||||||||||||||||||||||| ",
+        }],
+    }
+
+
+def _make_blast_result(hits: list[dict], query_id: str = "Q1", query_len: int = 31) -> dict:
+    return {
+        "BlastOutput2": [{
+            "report": {
+                "program": "blastp",
+                "version": "BLASTP 2.17.0+",
+                "search_target": {"db": "swissprot"},
+                "params": {},
+                "results": {
+                    "search": {
+                        "query_id": query_id,
+                        "query_title": "test query",
+                        "query_len": query_len,
+                        "hits": hits,
+                        "stat": {},
+                    }
+                },
+            }
+        }]
+    }
+
+
+class _FakeNCBIClient:
+    """Stand-in that records inputs and returns a canned blast_run output."""
+
+    def __init__(self, canned_result: dict) -> None:
+        self.canned_result = canned_result
+        self.calls: list[dict] = []
+
+    async def blast_run(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.canned_result
+
+
+async def test_bio_blast_search_formats_hits_per_spec() -> None:
+    """Tool reshapes the JSON2_S structure into the spec §4.6 hit shape:
+    each hit carries accession / description / organism / e_value /
+    bit_score / identity_pct / query_coverage_pct / alignment positions.
+    Top-5 hits include the alignment strings; the rest don't."""
+    hits = [
+        _make_hit(num=i, accession=f"P0000{i}", sciname=f"Species {i}", evalue=10**-i)
+        for i in range(1, 8)
+    ]
+    fake = _FakeNCBIClient(_make_blast_result(hits))
+    out = await bio_blast_search(
+        query_sequence="MFVNQHLCGSHLVEALYLVCGERGFFYTPKT",
+        program="blastp",
+        database="swissprot",
+        organism_filter=None,
+        max_hits=10,
+        e_value=10.0,
+        max_wait_seconds=None,
+        client=fake,
+    )
+    assert out["hit_count"] == 7
+    assert out["query_length"] == 31
+    assert out["program"] == "blastp"
+    assert out["database"] == "swissprot"
+    assert isinstance(out["hits"], list)
+    assert len(out["hits"]) == 7
+
+    first = out["hits"][0]
+    expected_keys = {
+        "accession", "description", "organism", "taxid",
+        "e_value", "bit_score", "identity_pct", "query_coverage_pct",
+        "query_from", "query_to", "hit_from", "hit_to", "align_length",
+        "identical_sequence_count",
+    }
+    assert expected_keys.issubset(first.keys()), (
+        f"missing keys: {expected_keys - first.keys()}"
+    )
+    assert first["accession"] == "P00001"
+    assert first["organism"] == "Species 1"
+    assert first["identity_pct"] == pytest.approx(96.77, abs=0.01)  # 30/31
+    assert first["query_coverage_pct"] == pytest.approx(100.0, abs=0.01)
+
+    # Top 5 hits inline alignment strings; hits 6 + 7 do not.
+    for i in range(5):
+        assert "qseq" in out["hits"][i], f"hit #{i} should have qseq"
+    for i in range(5, 7):
+        assert "qseq" not in out["hits"][i], f"hit #{i} should NOT have qseq"
+
+
+async def test_bio_blast_search_identical_sequence_count_from_description_list() -> None:
+    """Multiple description records on a single hit means that the hit's
+    sequence is identical across N database entries. The tool surfaces
+    that count so callers don't have to count description list length
+    themselves."""
+    hits = [
+        _make_hit(num=1, accession="P00001", sciname="Homo sapiens",
+                  evalue=1e-10, extra_descriptions=2),  # canonical + 2 identicals
+    ]
+    fake = _FakeNCBIClient(_make_blast_result(hits))
+    out = await bio_blast_search(
+        query_sequence="MFVNQHLCGSHLVEALYLVCGERGFFYTPKT",
+        program="blastp",
+        database="swissprot",
+        organism_filter=None,
+        max_hits=10,
+        e_value=10.0,
+        max_wait_seconds=None,
+        client=fake,
+    )
+    assert out["hits"][0]["identical_sequence_count"] == 3
+
+
+async def test_bio_blast_search_empty_hits_is_valid() -> None:
+    """A truly novel sequence with no homologues legitimately returns
+    zero hits. The tool must return a successful empty result, not an
+    error — empty hits are signal, not failure."""
+    fake = _FakeNCBIClient(_make_blast_result([]))
+    out = await bio_blast_search(
+        query_sequence="MFVNQHLCGSHLVEALYLVCGERGFFYTPKT",
+        program="blastp",
+        database="swissprot",
+        organism_filter=None,
+        max_hits=10,
+        e_value=10.0,
+        max_wait_seconds=None,
+        client=fake,
+    )
+    assert out["hit_count"] == 0
+    assert out["hits"] == []
+    assert "error" not in out
+
+
+async def test_bio_blast_search_max_wait_seconds_passes_through() -> None:
+    """The caller's max_wait_seconds (or default 600) flows to
+    client.blast_run; the cap of 1800s is enforced at the schema layer.
+    """
+    fake = _FakeNCBIClient(_make_blast_result([]))
+    await bio_blast_search(
+        query_sequence="MFVNQHLCGSHLVEALYLVCGERGFFYTPKT",
+        program="blastp",
+        database="swissprot",
+        organism_filter=None,
+        max_hits=10,
+        e_value=10.0,
+        max_wait_seconds=900,
+        client=fake,
+    )
+    assert fake.calls[0]["max_wait_seconds"] == 900
+    # Default falls through when None.
+    fake2 = _FakeNCBIClient(_make_blast_result([]))
+    await bio_blast_search(
+        query_sequence="MFVNQHLCGSHLVEALYLVCGERGFFYTPKT",
+        program="blastp",
+        database="swissprot",
+        organism_filter=None,
+        max_hits=10,
+        e_value=10.0,
+        max_wait_seconds=None,
+        client=fake2,
+    )
+    assert fake2.calls[0]["max_wait_seconds"] == 600
+
+
+async def test_bio_blast_search_handles_unknown_status_with_actionable_error() -> None:
+    """UNKNOWN status from NCBI is genuinely ambiguous (RID expired vs
+    never existed). The tool surfaces both interpretations in the
+    error_response so the caller gets actionable guidance."""
+
+    class _FailingClient:
+        async def blast_run(self, **_kwargs):
+            raise JobFailed(service="BLAST", job_id="EXPIRED123", status="UNKNOWN")
+
+    out = await bio_blast_search(
+        query_sequence="MFVNQHLCGSHLVEALYLVCGERGFFYTPKT",
+        program="blastp",
+        database="swissprot",
+        organism_filter=None,
+        max_hits=10,
+        e_value=10.0,
+        max_wait_seconds=None,
+        client=_FailingClient(),
+    )
+    assert "error" in out, f"expected error_response, got {out!r}"
+    suggestions_text = " ".join(out.get("suggestions", []))
+    # Both interpretations should be mentioned so the caller knows what
+    # action to take.
+    assert "expired" in suggestions_text.lower(), (
+        f"expected 'expired' in suggestions: {suggestions_text!r}"
+    )
 
 
 @respx.mock
