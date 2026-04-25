@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end smoke test — phases 1 + 2 + 3 + Session 8a fold (18 tools).
+"""End-to-end smoke test — phases 1 + 2 + 3 + Session 8a (19 tools).
 
 Calls every registered tool (``bio_fetch_sequence``, ``bio_fetch_uniprot``,
 ``bio_fetch_pdb``, ``bio_fetch_alphafold``, ``bio_align_sequences``,
@@ -7,11 +7,19 @@ Calls every registered tool (``bio_fetch_sequence``, ``bio_fetch_uniprot``,
 ``bio_fetch_variant``, ``bio_predict_variant_effect``, ``bio_fetch_gene``,
 ``bio_search_literature``, ``bio_fetch_paper_fulltext``,
 ``bio_fetch_pathway``, ``bio_fetch_interactions``, ``bio_blast_search``,
-``bio_codon_optimise``, ``bio_fold_sequence``) through the in-process
-FastMCP client — i.e. the same handshake path Claude would use — against
-real upstream APIs (except ``bio_codon_optimise`` and ``bio_fold_sequence``
-which are purely local), with the spec §10.2 test accessions. Prints a
-pass/fail summary and exits non-zero on any failure.
+``bio_codon_optimise``, ``bio_fold_sequence``, ``bio_design_grna``)
+through the in-process FastMCP client — i.e. the same handshake path
+Claude would use — against real upstream APIs (except
+``bio_codon_optimise`` and ``bio_fold_sequence`` which are purely local),
+with the spec §10.2 test accessions. Prints a pass/fail/skip summary and
+exits non-zero on any failure.
+
+``bio_design_grna`` is double-gated like the unit tests: without
+``CRISPOR_LIVE=1`` set in the environment it surfaces a loud SKIPPED
+line ("CRISPOR live exec gated on CRISPOR_LIVE=1") and the summary
+reports ``18 passed, 1 skipped`` rather than ``18/19 passed`` —
+explicit so a missing CRISPOR live-run doesn't look like a regression.
+On the LXC the gate is set and the case runs live against sacCer3.
 
 The BLAST smoke can run several minutes during NCBI peak hours; the
 case sets ``max_wait_seconds=900`` to give NCBI head-room.
@@ -34,6 +42,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import traceback
 from typing import Any
@@ -41,6 +50,78 @@ from typing import Any
 from fastmcp import Client
 
 from bioinformatics_mcp.server import mcp
+
+
+_SKIP_SENTINEL: object = object()
+"""Marker placed in a smoke case's ``args`` slot to signal "skip this
+case at runtime; the assertion field carries the human-readable reason".
+Lets the case list keep its three-tuple shape while encoding skip
+intent declaratively rather than via control flow at call sites."""
+
+
+# Synthetic 500 nt target with multiple NGG triplets — enough for CRISPOR
+# to find candidate guides anywhere in the genome. Same shape the unit
+# tests use; biological meaning is unimportant — the smoke asserts on
+# structure rather than on which yeast gene gets hit.
+_DESIGN_GRNA_TARGET = (
+    "ATGCAAGCTAGCTACGTACGTACGGAATCGATCGATCGTACGTAGGTACGTACGTACTAGG"
+    "CCCATGCAAGCTAGCTACGTACGTACAGGAATCGATCGATCGTACGTAGGTACGTACGTAC"
+    "TAGGCCCATGCAAGCTAGCTACGTACGTACAGGAATCGATCGATCGTACGTAGGTACGTAC"
+    "GTACTAGGCCCATGCAAGCTAGCTACGTACGTACAGGAATCGATCGATCGTACGTAGGTAC"
+    "GTACGTACTAGGCCCATGCAAGCTAGCTACGTACGTACAGGAATCGATCGATCGTACGTAG"
+    "GTACGTACGTACTAGGCCCATGCAAGCTAGCTACGTACGTACAGGAATCGATCGATCGTAC"
+    "GTAGGTACGTACGTACTAGGCCCATGCAAG"
+)
+
+
+def _design_grna_case() -> tuple[str, dict[str, Any] | object, Any]:
+    """bio_design_grna case — live when CRISPOR_LIVE=1 is set, skipped
+    otherwise. The skip reason is the same loud message the unit tests
+    print so the smoke harness and pytest output stay consistent.
+    """
+    if os.environ.get("CRISPOR_LIVE") != "1":
+        return (
+            "bio_design_grna",
+            _SKIP_SENTINEL,
+            "CRISPOR live exec gated on CRISPOR_LIVE=1 (set on LXC; "
+            "skipped on Apple Silicon dev where bundled CRISPOR x86_64 "
+            "binaries cannot run without Rosetta)",
+        )
+    return (
+        "bio_design_grna",
+        {
+            "target_sequence": _DESIGN_GRNA_TARGET,
+            "genome": "sacCer3",
+            "pam": "NGG",
+            "max_guides": 5,
+            "max_off_target_mismatches": 3,
+        },
+        lambda p: (
+            _assert(
+                p.get("error") is not True,
+                f"design_grna errored: {p.get('message')}",
+            ),
+            _assert(
+                p["candidate_guides_count"] >= 1,
+                "expected at least one candidate guide on synthetic target",
+            ),
+            _assert(
+                p["genome"] == "sacCer3",
+                f"genome={p['genome']}",
+            ),
+            _assert(
+                len(p["guides"]) >= 1 and len(p["guides"][0]["sequence"]) == 20,
+                "top guide spacer should be 20 nt (PAM stripped)",
+            ),
+            _assert(
+                p["provenance"]["source"] == "CRISPOR",
+                f"provenance.source={p['provenance'].get('source')}",
+            ),
+            f"sacCer3 candidates={p['candidate_guides_count']} "
+            f"returned={p['returned_guides_count']} "
+            f"top_mit={p['guides'][0]['specificity_score']}",
+        )[-1],
+    )
 
 
 def _first_text_payload(result: Any) -> Any:
@@ -76,9 +157,19 @@ def _first_text_payload(result: Any) -> Any:
 async def _check(
     client: Client,
     tool: str,
-    args: dict[str, Any],
+    args: dict[str, Any] | object,
     assertion: Any,
-) -> tuple[bool, str]:
+) -> tuple[bool | None, str]:
+    """Run one smoke case and return (status, detail).
+
+    status: ``True`` = pass, ``False`` = fail, ``None`` = skipped.
+    When ``args is _SKIP_SENTINEL`` the case is gated off; ``assertion``
+    holds the human-readable skip reason and we return immediately
+    without touching the client.
+    """
+    if args is _SKIP_SENTINEL:
+        return None, str(assertion)
+    assert isinstance(args, dict)
     try:
         result = await client.call_tool(tool, args)
     except Exception as exc:  # noqa: BLE001 — aggregating for summary
@@ -91,7 +182,7 @@ async def _check(
     return True, detail
 
 
-def _build_cases() -> list[tuple[str, dict[str, Any], Any]]:
+def _build_cases() -> list[tuple[str, dict[str, Any] | object, Any]]:
     # Mirror the server wrapper's view of EBI_EMAIL rather than reading
     # os.environ directly — the server loads .env via pydantic-settings,
     # so an EBI_EMAIL set in .env but not exported to the shell would
@@ -512,6 +603,7 @@ def _build_cases() -> list[tuple[str, dict[str, Any], Any]]:
                 f"top accession={p['hits'][0]['accession']}",
             )[-1],
         ),
+        _design_grna_case(),
         (
             "bio_fold_sequence",
             {
@@ -559,7 +651,9 @@ def _build_cases() -> list[tuple[str, dict[str, Any], Any]]:
 async def run() -> int:
     # Tool-name → (args, assertion) maps. Each assertion returns a short
     # human-readable summary on success, raises AssertionError on failure.
-    cases = [
+    # ``args`` is either a dict of tool inputs, or _SKIP_SENTINEL when the
+    # case is gated off (then the assertion field carries the skip reason).
+    cases: list[tuple[str, dict[str, Any] | object, Any]] = [
         (
             "bio_fetch_sequence",
             {"accession": "NM_001301717", "database": "nucleotide", "rettype": "fasta"},
@@ -618,7 +712,7 @@ async def run() -> int:
     cases.extend(_build_cases())
 
     async with Client(mcp) as client:
-        results: list[tuple[str, bool, str]] = []
+        results: list[tuple[str, bool | None, str]] = []
         tools = await client.list_tools()
         names = {t.name for t in tools}
         expected = {
@@ -640,6 +734,7 @@ async def run() -> int:
             "bio_blast_search",
             "bio_codon_optimise",
             "bio_fold_sequence",
+            "bio_design_grna",
         }
         missing = expected - names
         if missing:
@@ -650,13 +745,24 @@ async def run() -> int:
             ok, detail = await _check(client, tool, args, assertion)
             results.append((tool, ok, detail))
 
-    passed = sum(1 for _, ok, _ in results if ok)
+    passed = sum(1 for _, ok, _ in results if ok is True)
+    skipped = sum(1 for _, ok, _ in results if ok is None)
+    failed = sum(1 for _, ok, _ in results if ok is False)
     total = len(results)
-    print(f"\nPhase 1+2+3 smoke test  —  {passed}/{total} passed\n")
+    print(
+        f"\nPhase 1+2+3+8a smoke test  —  "
+        f"{passed} passed, {skipped} skipped, {failed} failed of "
+        f"{total} attempted\n"
+    )
     for name, ok, detail in results:
-        marker = "✓" if ok else "✗"
+        if ok is True:
+            marker = "✓"
+        elif ok is False:
+            marker = "✗"
+        else:
+            marker = "↷"  # skipped — distinct glyph so it stands out
         print(f"  {marker} {name:24}  {detail}")
-    return 0 if passed == total else 1
+    return 0 if failed == 0 else 1
 
 
 def _assert(cond: bool, msg: str) -> None:
