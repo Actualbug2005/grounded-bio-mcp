@@ -4,11 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "grounded-bio-mcp"
-version = "0.2.0"
+version = "0.3.0"
 description = "Primary-source bioinformatics MCP server — grounds sequence / structure / variant / compound / literature answers in real database fetches rather than training-data pattern matching."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "Proprietary" }
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Devlin" }]
 dependencies = [
     # MCP framework — spec §6 originally pinned `mcp[cli]>=1.2.0` (FastMCP 1.0,
