@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     """Runtime configuration sourced from the process environment.
 
     `.env` files are loaded on dev machines; on the LXC the systemd unit
-    provides the same variables via `EnvironmentFile=/etc/grounded_bio_mcp/env`.
+    provides the same variables via `EnvironmentFile=/etc/grounded-bio-mcp/env`.
     """
 
     model_config = SettingsConfigDict(
@@ -49,13 +49,13 @@ class Settings(BaseSettings):
         default=Path("/opt/crispor/venv/bin/python"), alias="CRISPOR_PYTHON"
     )
     genome_dir: Path = Field(
-        default=Path("/var/lib/grounded_bio_mcp/genomes"), alias="GENOME_DIR"
+        default=Path("/var/lib/grounded-bio-mcp/genomes"), alias="GENOME_DIR"
     )
     cache_dir: Path = Field(
-        default=Path("/var/lib/grounded_bio_mcp/cache"), alias="CACHE_DIR"
+        default=Path("/var/lib/grounded-bio-mcp/cache"), alias="CACHE_DIR"
     )
     log_dir: Path = Field(
-        default=Path("/var/lib/grounded_bio_mcp/logs"), alias="LOG_DIR"
+        default=Path("/var/lib/grounded-bio-mcp/logs"), alias="LOG_DIR"
     )
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 

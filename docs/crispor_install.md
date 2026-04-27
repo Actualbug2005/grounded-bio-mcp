@@ -16,7 +16,7 @@ These env vars must be set before invoking `bio_design_grna` or `scripts/fetch_g
 |---|---|---|
 | `CRISPOR_PATH` | `~/opt/crispor` | `/opt/crispor` |
 | `CRISPOR_PYTHON` | `~/opt/crispor/venv/bin/python` | `/opt/crispor/venv/bin/python` |
-| `GENOME_DIR` | `~/opt/crispor/genomes` | `/var/lib/grounded_bio_mcp/genomes` (post-rename) |
+| `GENOME_DIR` | `~/opt/crispor/genomes` | `/var/lib/grounded-bio-mcp/genomes` (post-rename) |
 
 `config.Settings` reads them via pydantic-settings; `bio_design_grna`'s runner factory in `server.py` consumes the settings rather than the env vars directly.
 
@@ -109,7 +109,7 @@ This adds ~1.5 GB of dependencies; gate the install behind a deliberate decision
 
 ```bash
 export CRISPOR_PATH=/opt/crispor
-export GENOME_DIR=/var/lib/grounded_bio_mcp/genomes  # post-rename in 8.5
+export GENOME_DIR=/var/lib/grounded-bio-mcp/genomes  # post-rename in 8.5
 mkdir -p "$GENOME_DIR"
 chown grounded-bio-mcp:grounded-bio-mcp "$GENOME_DIR"
 
@@ -151,7 +151,7 @@ The user's deployment-acceptance call decides between these. sacCer3 ships with 
 
 ### 5. systemd integration
 
-Per the Session 8b prompt, the systemd unit's `EnvironmentFile=/etc/grounded_bio_mcp/env` carries `CRISPOR_PATH`, `CRISPOR_PYTHON`, and `GENOME_DIR`. The unit runs as the `grounded-bio-mcp` system user; `chown -R grounded-bio-mcp:grounded-bio-mcp /opt/crispor` after install so the user can read CRISPOR + write its temp dirs (CRISPOR uses `/tmp` by default).
+Per the Session 8b prompt, the systemd unit's `EnvironmentFile=/etc/grounded-bio-mcp/env` carries `CRISPOR_PATH`, `CRISPOR_PYTHON`, and `GENOME_DIR`. The unit runs as the `grounded-bio-mcp` system user; `chown -R grounded-bio-mcp:grounded-bio-mcp /opt/crispor` after install so the user can read CRISPOR + write its temp dirs (CRISPOR uses `/tmp` by default).
 
 ## Verification
 

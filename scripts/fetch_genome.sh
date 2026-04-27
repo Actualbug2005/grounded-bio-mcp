@@ -33,7 +33,7 @@
 #                       crispor.py, bin/).
 #   GENOME_DIR          Where genome layouts land — typically
 #                       $CRISPOR_PATH/genomes (dev) or
-#                       /var/lib/grounded_bio_mcp/genomes (LXC).
+#                       /var/lib/grounded-bio-mcp/genomes (LXC).
 #
 # Optional env vars:
 #   CONFIRM_DOWNLOAD    Set to 1 to actually fetch felCat9/hg38/mm39.
