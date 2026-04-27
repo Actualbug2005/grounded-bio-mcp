@@ -6,7 +6,9 @@
 
 **On dev:** clone CRISPOR, install bwa + python@3.11 via Homebrew, create the venv, copy `genomes.sample/sacCer3/` into the configured `GENOME_DIR`. Live CRISPOR exec stays gated behind `CRISPOR_LIVE=1` because the bundled x86_64 binaries need Rosetta to run on Apple Silicon — wrapper testing happens against fixtures + mocked subprocesses.
 
-**On LXC:** apt-install bwa + python3.11, clone CRISPOR, create the venv, run `scripts/fetch_genome.sh` for each of sacCer3 / felCat9 / hg38 / mm39 (sacCer3 no-op, the others gated behind `CONFIRM_DOWNLOAD=1`). Bundled `bin/Linux-x86_64/` binaries run natively. Live CRISPOR exec runs unconditionally.
+**On LXC:** apt-install bwa + liblmdb-dev (system deps), use uv-managed Python 3.10 (not 3.11 — see below), create the venv with `uv venv`, install CRISPOR's pinned runtime deps from `scripts/crispor_runtime_requirements.txt`, copy `scripts/crispor_sitecustomize.py` into the venv's `site-packages/` to handle the Azimuth-2.0 random-state compatibility shim, then run `scripts/fetch_genome.sh` for each of sacCer3 / felCat9 / hg38 / mm39 (sacCer3 no-op, the others gated behind `CONFIRM_DOWNLOAD=1`). Bundled `bin/Linux-x86_64/` binaries run natively. Live CRISPOR exec runs unconditionally.
+
+**Why Python 3.10 specifically on LXC:** CRISPOR's bundled Azimuth-2.0 (Doench '16 fusi scoring) and rs3 ML models were built against scikit-learn 1.0.2, numpy 1.22.4, and lightgbm 3.3.5. None of those library versions have cp311 wheels on PyPI, so they can't be installed binary-only on Python 3.11. Python 3.10 has wheels for the entire pinned stack and is what CRISPOR's upstream `requirements.txt` was last cut against. The grounded-bio-mcp main app stays on Python 3.11; only CRISPOR's subvenv flips to 3.10.
 
 ## Required environment
 
@@ -80,30 +82,71 @@ CRISPOR's bundled `bin/Darwin/bwa` is x86_64 Mach-O. Apple Silicon runs it via R
 ### 1. System dependencies via apt
 
 ```bash
-apt update && apt install -y bwa python3.11 python3.11-venv git curl
+apt update && apt install -y bwa build-essential git curl liblmdb-dev
 ```
 
-`bwa` from Trixie's package archive replaces CRISPOR's bundled binary on dev. The bundled `bin/Linux-x86_64/` directory contains UCSC kent-tools (faToTwoBit, twoBitInfo, bedClip etc) that the script + CRISPOR rely on; those run natively on x86_64 Linux without translation.
+- `bwa` from Trixie's package archive is what CRISPOR shells out to for off-target alignment.
+- `build-essential` is needed because two of CRISPOR's pinned deps (`twobitreader` and `pytabix`) are sdist-only on PyPI and source-build during install.
+- `liblmdb-dev` is a fallback for the `lmdb` Python binding. Recent `lmdb` wheels bundle their own LMDB so this isn't strictly required for `lmdb==1.3.0`, but keeping it installed protects against future bumps that drop the bundled library.
 
-### 2. Clone + venv + deps
+The bundled `bin/Linux-x86_64/` directory inside the CRISPOR clone contains UCSC kent-tools (faToTwoBit, twoBitInfo, bedClip etc.) that the script + CRISPOR rely on; those run natively on x86_64 Linux without translation.
 
-Same as dev:
+Trixie's apt has no `python3.10` package, so we use uv to manage Python 3.10 directly. uv is installed system-wide at `/usr/local/bin/uv` per the Session 8b LXC bootstrap.
+
+### 2. Clone + venv + pinned deps + compat shim
 
 ```bash
-git clone --depth 1 https://github.com/maximilianh/crisporWebsite /opt/crispor
-cd /opt/crispor
-python3.11 -m venv venv
-venv/bin/pip install --upgrade pip
-venv/bin/pip install biopython numpy pandas scikit-learn twobitreader pytabix matplotlib xlwt
+# Clone CRISPOR into the service-user namespace
+git clone --depth 1 https://github.com/maximilianh/crisporWebsite /opt/grounded-bio-mcp/crispor
+cd /opt/grounded-bio-mcp/crispor
+
+# Install Python 3.10 toolchain via uv (one-time download, ~30 MB)
+uv python install 3.10
+
+# Create the venv on Python 3.10
+uv venv venv --python 3.10
+
+# Install CRISPOR's pinned runtime deps. DO NOT add --only-binary=:all: —
+# twobitreader and pytabix are sdist-only and source-build in seconds.
+uv pip install --python venv/bin/python --reinstall \
+    -r /opt/grounded-bio-mcp/app/scripts/crispor_runtime_requirements.txt
+
+# Copy the random-state compatibility shim into the venv. This is what
+# enables the bundled Azimuth-2.0 model to load under newer numpy.
+cp /opt/grounded-bio-mcp/app/scripts/crispor_sitecustomize.py \
+    venv/lib/python3.10/site-packages/sitecustomize.py
 ```
 
-For full scoring on hg38 / mm39 (Doench '16 + Azimuth via Keras / TensorFlow), additionally:
+#### Why the pinned versions matter
+
+CRISPOR's bundled scoring models (Azimuth-2.0 for fusi/Doench '16 and rs3 for the Listgarten Group's score) were trained and serialised with specific library versions. Newer versions break their predict paths in non-obvious ways:
+
+| Library | Pin | Why |
+|---|---|---|
+| scikit-learn | 1.0.2 | 1.2+ removes `sklearn.ensemble._gb_losses` (Azimuth load errors with `ModuleNotFoundError`); 1.1+ restructures `GradientBoostingRegressor` so 1.0.x serialised models predict-time-fail with `AttributeError: '_loss'` |
+| numpy | 1.22.4 | 1.21+ simplified `__randomstate_ctor` signature, breaking the random-state portion of the Azimuth model (the sitecustomize shim handles this; the pin keeps the rest of the ABI stable) |
+| lightgbm | 3.3.5 | 4.0+ changes `_n_classes` initialisation so rs3's serialised model crashes during predict() |
+| Plus 12 others | (see file) | Compatible transitives that satisfy the above without re-resolving them away |
+
+The full set is captured in [`scripts/crispor_runtime_requirements.txt`](../scripts/crispor_runtime_requirements.txt). Use `--reinstall` (broad, not `--reinstall-package`) when running this against an existing venv so uv re-resolves the entire graph in one atomic pass — anything less risks evicting pins during transitive resolution.
+
+### 3. Verify the venv
 
 ```bash
-venv/bin/pip install keras tensorflow h5py
+/opt/grounded-bio-mcp/crispor/venv/bin/python -c "
+import sklearn, numpy, scipy, pandas, matplotlib, lightgbm, rs3, Bio, lmdb, lmdbm
+print(f'sklearn {sklearn.__version__}, numpy {numpy.__version__}')
+print(f'scipy {scipy.__version__}, pandas {pandas.__version__}')
+print(f'matplotlib {matplotlib.__version__}, lightgbm {lightgbm.__version__}')
+print(f'rs3 {rs3.__version__}, Bio {Bio.__version__}, lmdb {lmdb.__version__}')
+import sklearn.ensemble._gb_losses
+import sitecustomize
+from numpy.random import _pickle as p
+print('shim loaded; ctor =', p.__randomstate_ctor)
+"
 ```
 
-This adds ~1.5 GB of dependencies; gate the install behind a deliberate decision in 8b.
+Expected: sklearn 1.0.2, numpy 1.22.4, scipy 1.8.1, pandas 1.4.2, matplotlib 3.5.2, lightgbm 3.3.5, rs3 0.0.15, Bio 1.79, lmdb 1.3.0. The `_compat_ctor` function reference confirms the shim is active.
 
 ### 3. Genome indexes (gated downloads)
 
@@ -178,9 +221,19 @@ Successful live run: candidate guides found, top guide spacer 20 nt with PAM str
 
 **"sacCer3.fa.bwt missing"** — partial install. Delete `GENOME_DIR/sacCer3/` and re-run `scripts/fetch_genome.sh sacCer3`.
 
-**`crispor.py` ImportError on `keras` / `tensorflow`** — full-scoring deps not installed. Either install them (`pip install keras tensorflow h5py`) or run with `--noEffScores`. The wrapper currently invokes the full pipeline; if scoring deps are missing, the subprocess exits non-zero and the wrapper surfaces `CrisporRunFailed`.
+**`crispor.py` DeprecationWarning on `cgi` / `pipes`** — cosmetic, ignore. CRISPOR's older codebase uses stdlib modules removed in 3.13+; we run under Python 3.10.x where they still work.
 
-**`crispor.py` DeprecationWarning on `cgi` / `pipes`** — cosmetic, ignore. CRISPOR's older codebase uses stdlib modules removed in 3.13+; we run under 3.11.15 where they still work.
+**`ModuleNotFoundError: No module named 'sklearn.ensemble._gb_losses'`** — installed sklearn is >=1.2 (which removed that internal module). The bundled Azimuth-2.0 model needs sklearn <1.2. Reinstall from [`scripts/crispor_runtime_requirements.txt`](../scripts/crispor_runtime_requirements.txt) which pins sklearn 1.0.2.
+
+**`AttributeError: 'GradientBoostingRegressor' object has no attribute '_loss'`** — installed sklearn is in the 1.1.x range (which restructured the loss attribute internally). The Azimuth model was built against sklearn 1.0.x. Same fix as above: pin to sklearn 1.0.2.
+
+**`TypeError: __randomstate_ctor() takes from 0 to 1 positional arguments but 2 were given`** — the random-state compatibility shim is missing from the venv's `site-packages/`. Copy [`scripts/crispor_sitecustomize.py`](../scripts/crispor_sitecustomize.py) into `<venv>/lib/python3.10/site-packages/sitecustomize.py` and re-run.
+
+**rs3 predict crash with `_n_classes=None`** — installed lightgbm is >=4.0 (which changed the internal class-count initialisation). The rs3 model needs lightgbm 3.x. Reinstall from the requirements file which pins lightgbm 3.3.5.
+
+**`ModuleNotFoundError: No module named 'lmdbm'`** (or `lmdb`) — the LMDB-backed outcome cache deps weren't installed. Both are pinned in the requirements file (lmdb 1.3.0, lmdbm 0.0.5); a fresh install from the requirements file picks them up.
+
+**Compiled stack disappears after a `--reinstall <single package>` command** — uv's `--reinstall` re-resolves the dependency graph and may evict pinned packages whose `>=` constraints from the new package's transitives let it pick newer or differently-resolved alternatives. Always reinstall the full requirements file (`uv pip install --reinstall -r scripts/crispor_runtime_requirements.txt`) rather than touching individual packages, so all 15 pins are negotiated as a single atomic resolution pass.
 
 ## What this document doesn't cover
 
