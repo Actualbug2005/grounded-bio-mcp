@@ -36,6 +36,11 @@ dev = [
     "respx>=0.21",
     "ruff>=0.7",
 ]
+deploy = [
+    # Production-only dependencies. Currently empty; reserved for future
+    # monitoring/metrics/observability additions (e.g. structlog,
+    # prometheus-client, sentry-sdk) that are not needed during dev or test.
+]
 
 [project.scripts]
 grounded-bio-mcp = "grounded_bio_mcp.server:main"
